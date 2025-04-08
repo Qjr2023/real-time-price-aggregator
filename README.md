@@ -12,6 +12,12 @@ This system fetches prices for financial assets (e.g., BTC, ETH) from multiple m
 - DynamoDB for historical price storage
 - Fault-tolerant and horizontally scalable microservices
 - Tested with Apache JMeter for load and latency
+- Supports 10,000 assets loaded from `symbols.csv`
+
+**Key Changes (Updated Design):**
+- `GET /prices/{asset}` now retrieves prices directly from Redis cache (no fetcher calls).
+- Assets are validated against a predefined list in `symbols.csv` (10,000 assets).
+- Manual `POST /refresh/{asset}` for price refresh, with plans for future automation.
 
 ## 🏗️ System Architecture
 
@@ -21,13 +27,12 @@ The system simulates three exchanges to mimic real-world trading platforms:
 - **Exchange 2**: Runs on `http://localhost:8082/mock/ticker/{symbol}`
 - **Exchange 3**: Runs on `http://localhost:8083/mock/ticker/{symbol}`
 
-Each exchange supports the top 10 cryptocurrencies by market cap (e.g., BTC, ETH, USDT, etc.) and provides price, volume, and timestamp data.
+Each exchange supports 10,000 assets defined in `symbols.csv` and provides mock price and timestamp data.
 
 ### Data Flow
-1. The main server fetches price data from the three mock exchanges.
-2. Prices are aggregated using a weighted average based on trading volume.
-3. Aggregated prices are cached in Redis and stored in DynamoDB.
-4. Users can query the aggregated price via the API or manually refresh it.
+1. The main server fetches price data from the three mock exchanges (via `POST /refresh/{asset}`).
+2. Prices are stored in Redis (cache) and DynamoDB (persistent storage).
+3. Users query the aggregated price via `GET /prices/{asset}`, which retrieves data from Redis.
 
 ### Data Structure
 #### DynamoDB Table
@@ -46,16 +51,16 @@ Each exchange supports the top 10 cryptocurrencies by market cap (e.g., BTC, ETH
 ## 🔧 Tech Stack
 - **Backend**: Go (microservices)
 - **Cache**: Redis
-- **Database**: DynamoDB (via Localstack for local testing)
+- **Database**: DynamoDB (via AWS DynamoDB)
 - **Testing**: Apache JMeter (for load and latency testing)
 - **Deployment**: Docker and Docker Compose
 
 **Note**: Kafka, MongoDB, and Prometheus + Grafana were part of the initial design but were omitted to simplify the project.
 
 ## ⚖️ Design Trade-offs
-- **Latency vs Cost**: Caching with Redis minimizes API call costs and latency, at the expense of slight data staleness (5-second TTL).
-- **Availability vs Consistency**: Prioritizes availability—if an exchange fails, the system serves partial or cached data.
-- **Hot vs Cold Data**: Frequently queried assets are cached in Redis; historical data is stored in DynamoDB.
+- **Latency vs Cost**: Caching with Redis minimizes latency, at the expense of slight data staleness (5-minute TTL).
+- **Availability vs Consistency**: Prioritizes availability—if Redis cache misses, returns 404.
+- **Scalability**: Supports 10,000 assets, with plans for distributed processing (e.g., Kafka) in the future.
 
 ## 📊 Performance Goals
 - Handle 1000+ concurrent queries/sec
@@ -85,11 +90,16 @@ Each exchange supports the top 10 cryptocurrencies by market cap (e.g., BTC, ETH
    git clone https://github.com/Qjr2023/real-time-price-aggregator.git
    cd real-time-price-aggregator
 
-2. **Initialize Go Modules** (if running locally):
-   ```bash
-   go mod init real-time-price-aggregator
-   go mod tidy
-   ```
+2. **Prepare `symbols.csv`**:
+   - Ensure `symbols.csv` exists in the project root with 10,000 asset symbols:
+     ```csv
+     symbol
+     btcusdt
+     ethusdt
+     adausdt
+     ...
+     symbol10000
+     ```
 
 3. **Start All Services with Docker Compose**:
    ```bash
@@ -98,48 +108,63 @@ Each exchange supports the top 10 cryptocurrencies by market cap (e.g., BTC, ETH
    This command will:
    - Build the Go services (main server and mock exchanges).
    - Start Redis on port `6379`.
-   - Start Localstack (DynamoDB) on port `4566`.
    - Start the three mock exchanges on ports `8081`, `8082`, and `8083`.
    - Start the main server on port `8080`.
-   - Automatically create the DynamoDB table `prices` when the server starts.
 
 ### API Design
 #### Endpoints
 - **GET /prices/{asset}**  
-  - **Description**: Retrieve the aggregated price (weighted average) of an asset.
+  - **Description**: Retrieve the cached price of an asset.
   - **Parameters**:
-    - `asset` (path parameter): Asset symbol (e.g., `BTCUSDT`).
-  - **Response**:
-    ```json
-    {
-      "asset": "BTCUSDT",
-      "price": 79450.12,
-      "last_updated": "2023-10-01 12:00:00"
-    }
-    ```
+     - `asset` (path parameter): Asset symbol (e.g., `btcusdt`).
+  - **Responses**:
+    - **200**: Success
+      ```json
+      {
+        "asset": "btcusdt",
+        "price": 79450.12,
+        "last_updated": 1696118400
+      }
+      ```
+    - **400**: Invalid asset symbol
+      ```json
+      {"msg": "Invalid asset symbol"}
+      ```
+    - **404**: Asset not found in cache
+      ```json
+      {"msg": "Asset not found"}
+      ```
 
 - **POST /refresh/{asset}**  
   - **Description**: Manually refresh the price of an asset.
   - **Parameters**:
-    - `asset` (path parameter): Asset symbol (e.g., `BTCUSDT`).
-  - **Response**:
-    ```json
-    {
-      "message": "Price for BTCUSDT refreshed"
-    }
-    ```
+    - `asset` (path parameter): Asset symbol (e.g., `btcusdt`).
+  - **Responses**:
+    - **200**: Success
+      ```json
+      {
+        "message": "Price for btcusdt refreshed"
+      }
+      ```
+    - **400**: Invalid asset symbol
+      ```json
+      {"msg": "Invalid asset symbol"}
+      ```
+    - **404**: Asset not found
+      ```json
+      {"msg": "Asset not found"}
+      ```
 
 #### Logic Flow
 - **GET /prices/{asset}**:
-  1. Check Redis cache.
-  2. If cache hit, return cached price.
-  3. If cache miss, fetch data from the three exchanges, calculate the weighted average.
-  4. Update Redis and DynamoDB.
-  5. Return the result.
+  1. Validate the asset against `symbols.csv`.
+  2. Retrieve price from Redis cache.
+  3. If cache miss, return 404.
 - **POST /refresh/{asset}**:
-  1. Forcefully fetch data from the three exchanges, calculate the weighted average.
-  2. Update Redis and DynamoDB.
-  3. Return confirmation message.
+  1. Validate the asset against `symbols.csv`.
+  2. Fetch mock price data (random price for simplicity).
+  3. Update Redis and DynamoDB.
+  4. Return confirmation message.
 
 ### Testing the System
 #### Automated Testing with `test.sh`
@@ -157,63 +182,60 @@ A `test.sh` script is provided to automate testing of the system components.
    ```
    The script will:
    - Test Redis connectivity.
-   - Test Localstack (DynamoDB) and verify the `prices` table exists.
    - Test the three mock exchanges (`8081`, `8082`, `8083`).
-   - Test the `GET /prices/BTCUSDT` endpoint.
-   - Test the `POST /refresh/BTCUSDT` endpoint.
+   - Test the `GET /prices/btcusdt` endpoint.
+   - Test the `POST /refresh/btcusdt` endpoint.
    - Verify that price data is stored in DynamoDB.
 
 #### Manual Testing  
 1. **Test the Mock Exchanges**:
-   Use `curl` or a browser to test an exchange:
    ```bash
-   curl http://localhost:8081/mock/ticker/BTCUSDT
+   curl http://localhost:8081/mock/ticker/btcusdt
    ```
    Expected response:
    ```json
    {
-     "symbol": "BTCUSDT",
+     "symbol": "btcusdt",
      "price": 79850.12,
-     "volume": 4500000000,
      "timestamp": 1696118400
    }
    ```
 
 2. **Test the API**:
-   - Get the price of an asset:
-     ```bash
-     curl http://localhost:8080/prices/BTCUSDT
-     ```
-     Expected response:
-     ```json
-     {
-       "asset": "BTCUSDT",
-       "price": 79450.12,
-       "last_updated": "2023-10-01 12:00:00"
-     }
-     ```
    - Refresh the price of an asset:
      ```bash
-     curl -X POST http://localhost:8080/refresh/BTCUSDT
+     curl -X POST http://localhost:8080/refresh/btcusdt
      ```
      Expected response:
      ```json
      {
-       "message": "Price for BTCUSDT refreshed"
+       "message": "Price for btcusdt refreshed"
+     }
+     ```
+   - Get the price of an asset:
+     ```bash
+     curl http://localhost:8080/prices/btcusdt
+     ```
+     Expected response:
+     ```json
+     {
+       "asset": "btcusdt",
+       "price": 79450.12,
+       "last_updated": 1696118400
      }
      ```
 
 3. **Check DynamoDB Data**:
    Verify that price data is stored in DynamoDB:
    ```bash
-   aws --endpoint-url=http://localhost:4566 dynamodb scan --table-name prices
+   aws dynamodb scan --table-name prices --region us-west-2
    ```
    Expected output:
    ```json
    {
      "Items": [
        {
-         "asset": {"S": "BTCUSDT"},
+         "asset": {"S": "btcusdt"},
          "timestamp": {"N": "1696118400"},
          "price": {"N": "79450.12"},
          "updated_at": {"N": "1696118405"}
@@ -240,6 +262,47 @@ A `test.sh` script is provided to automate testing of the system components.
      - Response Time: <100ms for cached requests
      - Redis Cache Hit Rate: >90%
 
+### Deployment to AWS EC2
+1. **Create an EC2 Instance**:
+   - Choose `t3.medium` (2 vCPU, 4 GiB memory).
+   - Configure security group to allow inbound traffic on ports `8080`, `8081`, `8082`, `8083`.
+
+2. **Install Docker and Docker Compose**:
+   ```bash
+   sudo apt update
+   sudo apt install docker.io docker-compose -y
+   sudo systemctl start docker
+   sudo systemctl enable docker
+   sudo usermod -aG docker ec2-user
+   ```
+
+3. **Configure DynamoDB Access**:
+   - Option 1: Use IAM Role (recommended):
+     - Create an IAM role with `AmazonDynamoDBFullAccess` policy.
+     - Attach the role to the EC2 instance.
+   - Option 2: Copy AWS credentials:
+     ```bash
+     scp -i your-key.pem ~/.aws/credentials ec2-user@your-ec2-ip:/home/ec2-user/.aws/
+     scp -i your-key.pem ~/.aws/config ec2-user@your-ec2-ip:/home/ec2-user/.aws/
+     ```
+
+4. **Deploy with Docker Compose**:
+   - Upload the project to EC2:
+     ```bash
+     scp -i your-key.pem -r ./real-time-price-aggregator ec2-user@your-ec2-ip:/home/ec2-user/
+     ```
+   - Run Docker Compose:
+     ```bash
+     cd /home/ec2-user/real-time-price-aggregator
+     docker-compose up -d
+     ```
+
+5. **Test the Deployment**:
+   ```bash
+   curl -X POST http://your-ec2-ip:8080/refresh/btcusdt
+   curl http://your-ec2-ip:8080/prices/btcusdt
+   ```
+
 ## Research
 - [CoinGecko](https://www.coingecko.com/) - Used for understanding price aggregation and market data.
 - [TradingView](https://www.tradingview.com/) - Reference for real-time financial data visualization.
@@ -247,7 +310,7 @@ A `test.sh` script is provided to automate testing of the system components.
 ## Project Updates
 For a detailed overview of my individual contributions, including literature review, project backlog, code, documentation, testing, and future plans, please see the following updates:
 
-- [Project Update 1](docs/Project_Update_1.md): Initial implementation, automation with Docker Compose, and testing plan.
+- [Project Update 1](docs/project_update/Project_Update_1.md): Initial implementation, automation with Docker Compose, and testing plan.
 
 
 ### Project Structure
@@ -262,10 +325,14 @@ real-time-price-aggregator/
 │   │   └── fetcher.go
 │   ├── cache/
 │   │   └── redis.go
-│   └── storage/
-│       └── dynamodb.go
+│   ├── storage/
+│   │   └── dynamodb.go
+│   └── types/
+│       └── types.go
 ├── mocks/
-│   └── mock_server.go
+│   │── mock_server.go
+│   └──Dockerfile
+├── symbols.csv
 ├── openapi.yaml
 ├── Dockerfile
 ├── docker-compose.yml
