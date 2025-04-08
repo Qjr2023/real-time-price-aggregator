@@ -3,78 +3,53 @@ package cache
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"log"
 	"time"
+
+	"real-time-price-aggregator/internal/types"
 
 	"github.com/go-redis/redis/v8"
 )
 
 // Cache interface defines caching operations
 type Cache interface {
-	Get(symbol string) (CachedPrice, error)
-	Set(symbol string, price CachedPrice) error
+	Get(key string) (*types.PriceData, error)
+	Set(key string, data *types.PriceData) error
 }
 
-// RedisCache implements the Cache interface
+// RedisCache implements the Cache interface using Redis
 type RedisCache struct {
 	client *redis.Client
 }
 
-// CachedPrice represents price data stored in cache
-type CachedPrice struct {
-	Price     float64 `json:"price"`
-	Timestamp int64   `json:"timestamp"`
-}
-
 // NewRedisCache creates a new Redis cache instance
-func NewRedisCache(client *redis.Client) Cache {
+func NewRedisCache(client *redis.Client) *RedisCache {
 	return &RedisCache{client: client}
 }
 
 // Get retrieves price data from Redis
-func (c *RedisCache) Get(symbol string) (CachedPrice, error) {
-	log.Printf("Fetching %s from Redis cache", symbol)
-	data, err := c.client.Get(context.Background(), symbol).Bytes()
+func (c *RedisCache) Get(key string) (*types.PriceData, error) {
+	ctx := context.Background()
+	data, err := c.client.Get(ctx, key).Bytes()
 	if err == redis.Nil {
-		log.Printf("Cache miss for %s", symbol)
-		return CachedPrice{}, fmt.Errorf("cache miss")
+		return nil, nil
 	}
 	if err != nil {
-		log.Printf("Redis error for %s: %v", symbol, err)
-		return CachedPrice{}, err
+		return nil, err
 	}
 
-	var price CachedPrice
-	if err := json.Unmarshal(data, &price); err != nil {
-		log.Printf("Failed to unmarshal cached data for %s: %v", symbol, err)
-		return CachedPrice{}, err
+	var priceData types.PriceData
+	if err := json.Unmarshal(data, &priceData); err != nil {
+		return nil, err
 	}
-
-	log.Printf("Cache hit for %s: price=%f, timestamp=%d",
-		symbol, price.Price, price.Timestamp)
-	return price, nil
+	return &priceData, nil
 }
 
-// Set saves price data to Redis
-func (c *RedisCache) Set(symbol string, price CachedPrice) error {
-	data, err := json.Marshal(price)
+// Set stores price data in Redis with a TTL
+func (c *RedisCache) Set(key string, data *types.PriceData) error {
+	ctx := context.Background()
+	dataBytes, err := json.Marshal(data)
 	if err != nil {
-		log.Printf("Failed to marshal price for %s: %v", symbol, err)
 		return err
 	}
-
-	// Use 5 minute TTL for testing
-	ttl := 5 * time.Minute
-	log.Printf("Setting cache for %s: price=%f, timestamp=%d, ttl=%v",
-		symbol, price.Price, price.Timestamp, ttl)
-
-	err = c.client.Set(context.Background(), symbol, data, ttl).Err()
-	if err != nil {
-		log.Printf("Redis set error for %s: %v", symbol, err)
-		return err
-	}
-
-	log.Printf("Successfully cached %s", symbol)
-	return nil
+	return c.client.Set(ctx, key, dataBytes, 5*time.Minute).Err()
 }

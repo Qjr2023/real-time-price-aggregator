@@ -5,8 +5,10 @@ RUN go mod download
 RUN apt-get update && apt-get install -y curl iputils-ping net-tools
 COPY . .
 RUN go build -o server cmd/main.go
+
 FROM golang:1.23
 WORKDIR /app
 COPY --from=builder /app/server .
+COPY symbols.csv .
 EXPOSE 8080
 CMD ["./server"]
