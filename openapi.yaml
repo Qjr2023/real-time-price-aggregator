@@ -1,0 +1,106 @@
+openapi: 3.0.0
+info:
+  description: Real-Time Price Aggregator for CS6650 Scalable Distributed Systems Final Project
+  version: '1.0'
+  title: Real-Time Price Aggregator API
+  contact:
+    email: your-email@example.com
+  license:
+    name: MIT License
+    url: 'https://opensource.org/licenses/MIT'
+paths:
+  /prices/{asset}:
+    get:
+      summary: Get the aggregated price of a financial asset
+      operationId: getPrice
+      parameters:
+        - name: asset
+          in: path
+          description: The symbol of the asset (e.g., BTCUSDT, ETHUSDT)
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successfully retrieved the aggregated price
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceResponse'
+        '400':
+          description: Invalid request (e.g., invalid asset symbol)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMsg'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMsg'
+  /refresh/{asset}:
+    post:
+      summary: Manually refresh the price of a financial asset
+      operationId: refreshPrice
+      parameters:
+        - name: asset
+          in: path
+          description: The symbol of the asset to refresh (e.g., BTCUSDT, ETHUSDT)
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Price successfully refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '400':
+          description: Invalid request (e.g., invalid asset symbol)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMsg'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMsg'
+components:
+  schemas:
+    PriceResponse:
+      type: object
+      properties:
+        asset:
+          type: string
+          description: The symbol of the asset
+          example: BTCUSDT
+        price:
+          type: number
+          format: float
+          description: The aggregated price of the asset
+          example: 79450.12
+        last_updated:
+          type: string
+          description: The time when the price was last updated
+          example: "2023-10-01 12:00:00"
+    RefreshResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Confirmation message
+          example: "Price for BTCUSDT refreshed"
+    ErrorMsg:
+      type: object
+      properties:
+        msg:
+          type: string
+          description: Error message
+          example: "Invalid asset symbol"
+servers:
+  - description: Local development server
+    url: http://localhost:8080

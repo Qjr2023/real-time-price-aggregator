@@ -1,0 +1,181 @@
+# services:
+#   redis:
+#     image: redis:latest
+#     ports:
+#       - "6379:6379"
+#     networks:
+#       - price-aggregator-network
+#     healthcheck:
+#       test: ["CMD", "redis-cli", "ping"]
+#       interval: 5s
+#       timeout: 5s
+#       retries: 5
+
+#   localstack:
+#     image: localstack/localstack:3.0
+#     ports:
+#       - "4566:4566"
+#     environment:
+#       - SERVICES=dynamodb
+#       - DEBUG=1
+#       - DATA_DIR=/var/lib/localstack
+#       - PERSISTENCE=1
+#       - LOCALSTACK_HOST=localhost
+#       - EAGER_SERVICE_LOADING=1
+#       - DYNAMODB_INITIALIZE_DB=1
+#     volumes:
+#       - ./localstack:/var/lib/localstack
+#       # - localstack-data:/var/lib/localstack
+#       - ./init-dynamodb.sh:/etc/localstack/init/ready.d/init-dynamodb.sh
+#     networks:
+#       - price-aggregator-network
+#     healthcheck:
+#       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+#       interval: 10s
+#       timeout: 10s
+#       retries: 5
+#       start_period: 20s
+
+#   exchange1:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#     command: go run mocks/mock_server.go 8081 exchange1
+#     ports:
+#       - "8081:8081"
+#     depends_on:
+#       - redis
+#       - localstack
+#     networks:
+#       - price-aggregator-network
+
+#   exchange2:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#     command: go run mocks/mock_server.go 8082 exchange2
+#     ports:
+#       - "8082:8082"
+#     depends_on:
+#       - redis
+#       - localstack
+#     networks:
+#       - price-aggregator-network
+
+#   exchange3:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#     command: go run mocks/mock_server.go 8083 exchange3
+#     ports:
+#       - "8083:8083"
+#     depends_on:
+#       - redis
+#       - localstack
+#     networks:
+#       - price-aggregator-network
+
+#   server:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#     command: go run cmd/main.go
+#     ports:
+#       - "8080:8080"
+#     depends_on:
+#       redis:
+#         condition: service_healthy
+#       localstack:
+#         condition: service_healthy
+#       exchange1:
+#         condition: service_started
+#       exchange2:
+#         condition: service_started
+#       exchange3:
+#         condition: service_started
+#     networks:
+#       - price-aggregator-network
+#     restart: on-failure
+#     # Add a delay to ensure LocalStack is fully initialized
+#     entrypoint: >
+#       /bin/sh -c "
+#       echo 'Waiting for LocalStack to be fully initialized...' &&
+#       sleep 15 &&
+#       go run cmd/main.go
+#       "
+
+# networks:
+#   price-aggregator-network:
+#     driver: bridge
+
+# volumes:
+#   localstack-data:
+
+
+services:
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    networks:
+      - price-aggregator-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  exchange1:
+    build:
+      context: .
+      dockerfile: mocks/Dockerfile  # 指向 mocks 目录下的 Dockerfile
+    command: ./mock_server 8081 exchange1
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - price-aggregator-network
+
+  exchange2:
+    build:
+      context: .
+      dockerfile: mocks/Dockerfile
+    command: ./mock_server 8082 exchange2
+    ports:
+      - "8082:8082"
+    depends_on:
+      - redis
+    networks:
+      - price-aggregator-network
+
+  exchange3:
+    build:
+      context: .
+      dockerfile: mocks/Dockerfile
+    command: ./mock_server 8083 exchange3
+    ports:
+      - "8083:8083"
+    depends_on:
+      - redis
+    networks:
+      - price-aggregator-network
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+    networks:
+      - price-aggregator-network
+    volumes:
+      - ~/.aws:/root/.aws:ro  # 挂载宿主机的 AWS 凭证
+    environment:
+      - AWS_REGION=us-west-2
+
+networks:
+  price-aggregator-network:
+    driver: bridge
