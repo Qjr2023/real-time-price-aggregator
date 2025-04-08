@@ -1,75 +1,81 @@
 #!/bin/bash
 
-# test.sh: Script to test the Real-Time Price Aggregator system
+# Test script for Real-Time Price Aggregator API
+
+# Base URL
+BASE_URL="http://localhost:8080"
 
 # Colors for output
-RED='\033[0;31m'
 GREEN='\033[0;32m'
+RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# Function to print success message
-success() {
-    echo -e "${GREEN}[SUCCESS] $1${NC}"
-}
-
-# Function to print failure message and exit
-failure() {
-    echo -e "${RED}[FAILURE] $1${NC}"
-    exit 1
-}
-
-# Test 1: Check if Redis is running
-echo "Testing Redis connectivity..."
-if redis-cli -h localhost -p 6379 ping | grep -q "PONG"; then
-    success "Redis is running and responding"
-else
-    failure "Redis is not running or not responding"
-fi
-
-# Test 2: Check if Localstack (DynamoDB) is running
-echo "Testing Localstack (DynamoDB) connectivity..."
-if aws --endpoint-url=http://localhost:4566 dynamodb list-tables | grep -q "prices"; then
-    success "Localstack is running and DynamoDB table 'prices' exists"
-else
-    failure "Localstack is not running or DynamoDB table 'prices' is not created"
-fi
-
-# Test 3: Test the mock exchanges
-echo "Testing mock exchanges..."
-for port in 8081 8082 8083; do
-    response=$(curl -s http://localhost:$port/mock/ticker/BTCUSDT)
-    if echo "$response" | grep -q '"symbol":"BTCUSDT"'; then
-        success "Exchange on port $port is running and responding"
+# Function to print test result
+print_result() {
+    if [ $1 -eq 0 ]; then
+        echo -e "${GREEN}PASS: $2${NC}"
     else
-        failure "Exchange on port $port is not running or not responding"
+        echo -e "${RED}FAIL: $2${NC}"
+        exit 1
     fi
-done
+}
 
-# Test 4: Test the main API (GET /prices/{asset})
-echo "Testing GET /prices/BTCUSDT..."
-response=$(curl -s http://localhost:8080/prices/BTCUSDT)
-if echo "$response" | grep -q '"asset":"BTCUSDT"'; then
-    success "GET /prices/BTCUSDT returned a valid response"
+# Test 1: Health check
+echo "Testing health endpoint..."
+http_code=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/health")
+[ "$http_code" -eq 200 ]
+print_result $? "Health check should return 200"
+
+# Test 2: POST refresh asset1
+echo "Testing POST /refresh/asset1..."
+response=$(curl -s -X POST "${BASE_URL}/refresh/asset1")
+http_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${BASE_URL}/refresh/asset1")
+echo "$response" | grep -q '"message":"Price for asset1 refreshed"'
+print_result $? "POST /refresh/asset1 should return success message"
+[ "$http_code" -eq 200 ]
+print_result $? "POST /refresh/asset1 should return status 200"
+
+# Test 3: GET asset1 (should succeed, from cache)
+echo "Testing GET /prices/asset1 (from cache)..."
+response=$(curl -s "${BASE_URL}/prices/asset1")
+http_code=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/prices/asset1")
+echo "$response" | grep -q '"asset":"asset1"'
+print_result $? "GET /prices/asset1 should return price data"
+[ "$http_code" -eq 200 ]
+print_result $? "GET /prices/asset1 should return status 200"
+
+# Test 4: GET asset10001 (not in CSV)
+echo "Testing GET /prices/asset10001 (not in CSV)..."
+response=$(curl -s "${BASE_URL}/prices/asset10001")
+http_code=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/prices/asset10001")
+echo "$response" | grep -q '"msg":"Asset not found"'
+print_result $? "GET /prices/asset10001 should return 404 (Asset not found)"
+[ "$http_code" -eq 404 ]
+print_result $? "GET /prices/asset10001 should return status 404"
+
+# Test 5: POST refresh asset10001 (not in CSV)
+echo "Testing POST /refresh/asset10001 (not in CSV)..."
+response=$(curl -s -X POST "${BASE_URL}/refresh/asset10001")
+http_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${BASE_URL}/refresh/asset10001")
+echo "$response" | grep -q '"msg":"Asset not found"'
+print_result $? "POST /refresh/asset10001 should return 404 (Asset not found)"
+[ "$http_code" -eq 404 ]
+print_result $? "POST /refresh/asset10001 should return status 404"
+
+# Test 6: Check DynamoDB
+echo "Checking DynamoDB for asset1..."
+result=$(aws dynamodb scan \
+  --table-name prices \
+  --region us-west-2 \
+  --query "Items[?asset.S=='asset1']" \
+  --output json)
+
+count=$(echo "$result" | jq 'length')
+if [ "$count" -gt 0 ]; then
+  print_result 0 "DynamoDB contains asset1 record"
 else
-    failure "GET /prices/BTCUSDT failed"
+  print_result 1 "DynamoDB should contain asset1 record"
 fi
 
-# Test 5: Test the main API (POST /refresh/{asset})
-echo "Testing POST /refresh/BTCUSDT..."
-response=$(curl -s -X POST http://localhost:8080/refresh/BTCUSDT)
-if echo "$response" | grep -q '"message":"Price for BTCUSDT refreshed"'; then
-    success "POST /refresh/BTCUSDT returned a valid response"
-else
-    failure "POST /refresh/BTCUSDT failed"
-fi
 
-# Test 6: Check DynamoDB for stored data
-echo "Checking DynamoDB for stored data..."
-response=$(aws --endpoint-url=http://localhost:4566 dynamodb scan --table-name prices)
-if echo "$response" | grep -q '"asset": {"S": "BTCUSDT"}'; then
-    success "DynamoDB contains price data for BTCUSDT"
-else
-    failure "DynamoDB does not contain expected price data"
-fi
-
-echo -e "${GREEN}All tests passed successfully!${NC}"
+echo -e "${GREEN}All tests passed!${NC}"
