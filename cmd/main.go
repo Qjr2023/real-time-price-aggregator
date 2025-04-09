@@ -16,11 +16,14 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// Supported assets (loaded from CSV)
+// supportedAssets holds the list of supported asset symbols
 var supportedAssets map[string]bool
 
+// loadSymbols loads supported asset symbols from a CSV file
 func loadSymbols(filename string) {
+	// Initialize the map to store supported assets
 	supportedAssets = make(map[string]bool)
+	// Open the CSV file
 	file, err := os.Open(filename)
 	if err != nil {
 		log.Fatalf("Failed to open symbols file: %v", err)

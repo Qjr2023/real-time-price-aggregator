@@ -17,10 +17,18 @@ func main() {
 	port := os.Args[1]
 	exchangeName := os.Args[2]
 
-	http.HandleFunc("/mock/ticker", func(w http.ResponseWriter, r *http.Request) {
-		price := 50.0 + rand.Float64()*50.0 // create a random price between 50 and 100
+	http.HandleFunc("/mock/ticker/", func(w http.ResponseWriter, r *http.Request) {
+		// Extract symbol from URL
+		symbol := r.URL.Path[len("/mock/ticker/"):]
+		if symbol == "" {
+			http.Error(w, `{"error":"symbol is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		price := 50.0 + rand.Float64()*50.0            // Random price between 50 and 100
+		volume := 1000000.0 + rand.Float64()*9000000.0 // Random volume between 1M and 10M
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"symbol":"mock","price":%.2f,"time":%d}`, price, time.Now().Unix())
+		fmt.Fprintf(w, `{"symbol":"%s","price":%.2f,"volume":%.2f,"timestamp":%d}`, symbol, price, volume, time.Now().Unix())
 	})
 
 	addr := fmt.Sprintf(":%s", port)

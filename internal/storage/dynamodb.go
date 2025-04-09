@@ -14,6 +14,7 @@ import (
 // Storage interface defines data persistence operations
 type Storage interface {
 	Save(record PriceRecord) error
+	Get(asset string) (*PriceRecord, error) // Add Get method
 }
 
 // PriceRecord represents a price record to be stored in DynamoDB
@@ -68,8 +69,36 @@ func (s *DynamoDBStorage) Save(record PriceRecord) error {
 	return nil
 }
 
-// ToPriceRecord converts PriceData to PriceRecord
-func ToPriceRecord(data *types.PriceData) PriceRecord {
+// Get retrieves the latest price record for an asset from DynamoDB
+func (s *DynamoDBStorage) Get(asset string) (*PriceRecord, error) {
+	input := &dynamodb.QueryInput{
+		TableName:              aws.String("prices"),
+		KeyConditionExpression: aws.String("asset = :asset"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":asset": {S: aws.String(asset)},
+		},
+		ScanIndexForward: aws.Bool(false), // Get the latest record (descending order)
+		Limit:            aws.Int64(1),    // Only need the most recent record
+	}
+
+	result, err := s.client.Query(input)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(result.Items) == 0 {
+		return nil, nil
+	}
+
+	var record PriceRecord
+	if err := dynamodbattribute.UnmarshalMap(result.Items[0], &record); err != nil {
+		return nil, err
+	}
+	return &record, nil
+}
+
+// ConvertPriceDataToRecord converts a PriceData to a PriceRecord
+func ConvertPriceDataToRecord(data *types.PriceData) PriceRecord {
 	return PriceRecord{
 		Asset:     data.Asset,
 		Timestamp: data.Timestamp,
