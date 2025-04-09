@@ -26,7 +26,7 @@ func NewFetcher(endpoints []string) Fetcher {
 // FetchPrice fetches the price for a symbol (mock implementation)
 func (f *fetcherImpl) FetchPrice(symbol string) (*types.PriceData, error) {
 	// Mock implementation: return a random price
-	price := 50.0 + rand.Float64()*50.0 // 随机价格 50-100
+	price := 50.0 + rand.Float64()*50.0 // create a random price between 50 and 100
 	return &types.PriceData{
 		Asset:     strings.ToLower(symbol),
 		Price:     price,

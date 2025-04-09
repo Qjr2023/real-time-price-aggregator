@@ -33,7 +33,7 @@ func loadSymbols(filename string) {
 		log.Fatalf("Failed to read symbols file: %v", err)
 	}
 
-	for _, record := range records[1:] { // 跳过表头
+	for _, record := range records[1:] { // Skip header
 		asset := strings.ToLower(record[0])
 		supportedAssets[asset] = true
 	}

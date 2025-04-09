@@ -18,7 +18,7 @@ func main() {
 	exchangeName := os.Args[2]
 
 	http.HandleFunc("/mock/ticker", func(w http.ResponseWriter, r *http.Request) {
-		price := 50.0 + rand.Float64()*50.0 // 随机价格 50-100
+		price := 50.0 + rand.Float64()*50.0 // create a random price between 50 and 100
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"symbol":"mock","price":%.2f,"time":%d}`, price, time.Now().Unix())
 	})
