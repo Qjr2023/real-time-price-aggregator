@@ -139,10 +139,31 @@ resource "aws_instance" "exchange3" {
   }
 }
 
+data "aws_ami" "amazon_linux_2023" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023*-x86_64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+
+  filter {
+    name   = "root-device-type"
+    values = ["ebs"]
+  }
+}
+
 # 主API服务器实例
 resource "aws_instance" "api_server" {
-  ami                    = "ami-0efcece6bed30fd98"  # Amazon Linux 2 AMI
+  ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "t3.small"
+  key_name               = "cs6650hw1b"
   vpc_security_group_ids = [aws_security_group.price_aggregator_sg.id]
 
   user_data = <<-EOF
