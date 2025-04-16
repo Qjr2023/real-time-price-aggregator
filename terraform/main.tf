@@ -52,6 +52,7 @@ resource "aws_security_group" "price_aggregator_sg" {
 resource "aws_instance" "redis" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "t3.micro"
+  key_name               = "cs6650hw1b"
   vpc_security_group_ids = [aws_security_group.price_aggregator_sg.id]
 
   user_data = <<-EOF
@@ -77,6 +78,7 @@ resource "aws_instance" "redis" {
 resource "aws_instance" "exchange1" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "t3.micro"
+  key_name               = "cs6650hw1b"
   vpc_security_group_ids = [aws_security_group.price_aggregator_sg.id]
 
   user_data = <<-EOF
@@ -106,6 +108,7 @@ resource "aws_instance" "exchange1" {
 resource "aws_instance" "exchange2" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "t3.micro"
+  key_name               = "cs6650hw1b"
   vpc_security_group_ids = [aws_security_group.price_aggregator_sg.id]
 
   user_data = <<-EOF
@@ -133,6 +136,7 @@ resource "aws_instance" "exchange2" {
 resource "aws_instance" "exchange3" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "t3.micro"
+  key_name               = "cs6650hw1b"
   vpc_security_group_ids = [aws_security_group.price_aggregator_sg.id]
 
   user_data = <<-EOF
@@ -162,6 +166,7 @@ resource "aws_instance" "exchange3" {
 resource "aws_instance" "api_server" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "t3.small"
+  key_name               = "cs6650hw1b"
   vpc_security_group_ids = [aws_security_group.price_aggregator_sg.id]
 
   user_data = <<-EOF
@@ -182,6 +187,24 @@ resource "aws_instance" "api_server" {
               sed -i 's/"http:\/\/exchange2:8082\/mock\/ticker"/os.Getenv("EXCHANGE2_URL")/g' cmd/main.go
               sed -i 's/"http:\/\/exchange3:8083\/mock\/ticker"/os.Getenv("EXCHANGE3_URL")/g' cmd/main.go
               
+              # create AWS credentials file
+              mkdir -p /home/ec2-user/.aws
+              cat > /home/ec2-user/.aws/credentials <<CREDENTIALS
+              [default]
+              aws_access_key_id=your_access_key_id
+              aws_secret_access_key=your_secret_access_key
+              aws_session_token=your_session_token
+              CREDENTIALS
+              
+              cat > /home/ec2-user/.aws/config <<CONFIG
+              [default]
+              region=us-west-2
+              CONFIG
+              
+              # setup permissions
+              chmod 600 /home/ec2-user/.aws/credentials
+              chmod 600 /home/ec2-user/.aws/config
+
               # setup environment variables
               export REDIS_ADDR="${aws_instance.redis.private_ip}:6379"
               export EXCHANGE1_URL="http://${aws_instance.exchange1.private_ip}:8081/mock/ticker"
@@ -203,6 +226,7 @@ resource "aws_instance" "api_server" {
               # build and run API server
               docker build -t api-server -f Dockerfile .
               docker run -d -p 8080:8080 \
+                -v /home/ec2-user/.aws:/root/.aws:ro \\
                 -e REDIS_ADDR="\$REDIS_ADDR" \\
                 -e EXCHANGE1_URL="\$EXCHANGE1_URL" \\
                 -e EXCHANGE2_URL="\$EXCHANGE2_URL" \\
