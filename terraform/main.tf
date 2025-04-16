@@ -191,9 +191,9 @@ resource "aws_instance" "api_server" {
               mkdir -p /home/ec2-user/.aws
               cat > /home/ec2-user/.aws/credentials <<CREDENTIALS
               [default]
-              aws_access_key_id=ASIATHT4AVIDBROVKWX5
-              aws_secret_access_key=5YQasL6XTOstkTFYilo3VukRLPYNS93eMS0ZKeA3
-              aws_session_token=IQoJb3JpZ2luX2VjEMH//////////wEaCXVzLXdlc3QtMiJIMEYCIQDDfusfZ9ms/BhNEZAbsqZT3NmBO7KKSEwRft3U1Ua/rwIhAOmdcywcEYesMfOOUE9FQsmSjkCSCGQxJv1/N7RKjBH3KrMCCEoQARoMMjIyNTI0NjQ3OTQyIgwrhZDMAJ7cuGyjSSIqkAKC3OFLUN3Bhs80FUhB9M8NSXp6OYHSIFdqrzcFgI1rqJz4fuNfpdYs7Jwdvf0vuqEkHY9yEf0efuDZpHvtuEr1nSrqtSfDXtuTLRPHMPAnCllUT/u/oNhI6A4YCQCOlgoCFgdI0dyDh9EwjiENfVaLG+rwA0/lnfPnhuW71ycSDCV7THwPmctq6QBjsJN/jMSk82CV+dn43Xq1qezvobRgTljaPIv9ZqvTG/XAAs+Qoy9yGUc9Xvrpn0rYn5GBKH6KvAETj1dq5tn1kxr/oVmoWCQzO8PeLt9/+qV7RMpCt5ZSJMVAswYTzTgi1fqpxmNGreDoIXN3NiIf8vCq8bmaOcRvbpuOZd3dGFlJGMIFNzDfv/+/BjqcAdwR8kjq4767mKMCDf1abDc+Bi/TJrzrewdlXd9xl3ccobJayzGlwlGjy+QnO7095uvxogMkK8pC8MqffGt7m/GUQJ/HNjVenHCJ9E0/K1pzltrGVaHREGVnyRdw+m7VXyjXRpPRBCV8jrABTvt9PB83gCPYPWEREgGdeGO2LFbqpUlMbmaTQ+jn8+1fgDYvABmAHkzNLEg2p4B9Yw==
+              aws_access_key_id=your_access_key_id
+              aws_secret_access_key=your_secret_access_key
+              aws_session_token=your_session_token
               CREDENTIALS
               
               cat > /home/ec2-user/.aws/config <<CONFIG
