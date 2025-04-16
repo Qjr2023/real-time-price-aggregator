@@ -47,9 +47,15 @@ func main() {
 	// Load symbols from CSV
 	loadSymbols("symbols.csv")
 
-	// Initialize Redis client
+	// Get Redis connection info from environment variables or use defaults
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "redis:6379" // Default for local development
+	}
+
+	// Initialize Redis client with appropriate address
 	redisClient := redis.NewClient(&redis.Options{
-		Addr: "redis:6379",
+		Addr: redisAddr,
 	})
 
 	// Test Redis connection
@@ -60,11 +66,27 @@ func main() {
 	// Initialize DynamoDB client
 	dynamoClient := storage.NewDynamoDBClient()
 
-	// Initialize Fetcher
+	// Get exchange hosts from environment variables or use defaults
+	exchange1 := os.Getenv("EXCHANGE1_URL")
+	if exchange1 == "" {
+		exchange1 = "http://exchange1:8081/mock/ticker" // Default for local
+	}
+
+	exchange2 := os.Getenv("EXCHANGE2_URL")
+	if exchange2 == "" {
+		exchange2 = "http://exchange2:8082/mock/ticker" // Default for local
+	}
+
+	exchange3 := os.Getenv("EXCHANGE3_URL")
+	if exchange3 == "" {
+		exchange3 = "http://exchange3:8083/mock/ticker" // Default for local
+	}
+
+	// Initialize Fetcher with environment-specific URLs
 	priceFetcher := fetcher.NewFetcher([]string{
-		"http://exchange1:8081/mock/ticker",
-		"http://exchange2:8082/mock/ticker",
-		"http://exchange3:8083/mock/ticker",
+		exchange1,
+		exchange2,
+		exchange3,
 	})
 
 	// Initialize Cache and Storage
