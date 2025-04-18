@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"real-time-price-aggregator/internal/types"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Fetcher interface defines price fetching operations
@@ -33,33 +35,57 @@ func (f *fetcher) FetchPrice(symbol string) (*types.PriceData, error) {
 	}
 
 	var responses []mockResponse
-	var lastErr error
+	var mu sync.Mutex // mutex for safe concurrent access to responses
+	var wg sync.WaitGroup
 
-	// Fetch data from all endpoints
+	// create a buffered channel for error handling
+	errChan := make(chan error, len(f.endpoints))
+
+	// concurrent fetch from all endpoints
 	for _, endpoint := range f.endpoints {
-		url := fmt.Sprintf("%s/%s", endpoint, symbol)
-		resp, err := http.Get(url)
-		if err != nil {
-			lastErr = fmt.Errorf("failed to fetch from %s: %v", endpoint, err)
-			continue
-		}
-		defer resp.Body.Close()
+		wg.Add(1)
+		go func(endpoint string) {
+			defer wg.Done()
 
-		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("unexpected status code from %s: %d", endpoint, resp.StatusCode)
-			continue
-		}
+			url := fmt.Sprintf("%s/%s", endpoint, symbol)
+			// add a timeout to the HTTP client
+			client := &http.Client{Timeout: 3 * time.Second}
+			resp, err := client.Get(url)
+			if err != nil {
+				errChan <- fmt.Errorf("failed to fetch from %s: %v", endpoint, err)
+				return
+			}
+			defer resp.Body.Close()
 
-		var mockResp mockResponse
-		if err := json.NewDecoder(resp.Body).Decode(&mockResp); err != nil {
-			lastErr = fmt.Errorf("failed to decode response from %s: %v", endpoint, err)
-			continue
-		}
+			if resp.StatusCode != http.StatusOK {
+				errChan <- fmt.Errorf("unexpected status code from %s: %d", endpoint, resp.StatusCode)
+				return
+			}
 
-		responses = append(responses, mockResp)
+			var mockResp mockResponse
+			if err := json.NewDecoder(resp.Body).Decode(&mockResp); err != nil {
+				errChan <- fmt.Errorf("failed to decode response from %s: %v", endpoint, err)
+				return
+			}
+
+			// safe concurrent access to responses
+			mu.Lock()
+			responses = append(responses, mockResp)
+			mu.Unlock()
+		}(endpoint)
 	}
 
-	// Check if we have any valid responses
+	// wait for all goroutines to finish
+	wg.Wait()
+	close(errChan)
+
+	// check for errors
+	var lastErr error
+	for err := range errChan {
+		lastErr = err
+	}
+
+	// check if we have valid responses
 	if len(responses) == 0 {
 		if lastErr == nil {
 			lastErr = fmt.Errorf("no valid data received from any endpoint")
