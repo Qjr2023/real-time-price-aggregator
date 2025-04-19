@@ -7,3 +7,4 @@ terraform/terraform.tfstate
 terraform/terraform.tfvars
 terraform/terraform.tfvars.json
 terraform/terraform.tfstate.backup
+terraform/ terraform.tfvars

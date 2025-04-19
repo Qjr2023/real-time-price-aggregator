@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/csv"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -9,7 +10,6 @@ import (
 
 	"real-time-price-aggregator/internal/api"
 	"real-time-price-aggregator/internal/cache"
-	"real-time-price-aggregator/internal/fetcher"
 	"real-time-price-aggregator/internal/storage"
 
 	"github.com/go-redis/redis/v8"
@@ -66,43 +66,34 @@ func main() {
 	// Initialize DynamoDB client
 	dynamoClient := storage.NewDynamoDBClient()
 
-	// Get exchange hosts from environment variables or use defaults
-	exchange1 := os.Getenv("EXCHANGE1_URL")
-	if exchange1 == "" {
-		exchange1 = "http://exchange1:8081/mock/ticker" // Default for local
-	}
-
-	exchange2 := os.Getenv("EXCHANGE2_URL")
-	if exchange2 == "" {
-		exchange2 = "http://exchange2:8082/mock/ticker" // Default for local
-	}
-
-	exchange3 := os.Getenv("EXCHANGE3_URL")
-	if exchange3 == "" {
-		exchange3 = "http://exchange3:8083/mock/ticker" // Default for local
-	}
-
-	// Initialize Fetcher with environment-specific URLs
-	priceFetcher := fetcher.NewFetcher([]string{
-		exchange1,
-		exchange2,
-		exchange3,
-	})
-
 	// Initialize Cache and Storage
 	priceCache := cache.NewRedisCache(redisClient)
 	priceStorage := storage.NewDynamoDBStorage(dynamoClient)
 
 	// Initialize API Handler
-	handler := api.NewHandler(priceFetcher, priceCache, priceStorage, supportedAssets)
+	handler := api.NewHandler(priceCache, priceStorage, supportedAssets)
 
 	// Set up routes
 	r := mux.NewRouter()
 	r.HandleFunc("/prices/{asset}", handler.GetPrice).Methods("GET")
-	r.HandleFunc("/refresh/{asset}", handler.RefreshPrice).Methods("POST")
+
+	// add health check endpoint
 	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
+	}).Methods("GET")
+
+	// add system info endpoint
+	r.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
+		info := map[string]interface{}{
+			"service":  "Price Aggregator API",
+			"version":  "2.0",
+			"features": []string{"Get cached price data", "Automatic tiered refresh via Lambda"},
+			"note":     "Price refreshing is now handled by AWS Lambda with tiered refresh strategy",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(info)
 	}).Methods("GET")
 
 	// Start server
