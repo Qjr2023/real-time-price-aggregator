@@ -2,7 +2,9 @@ package storage
 
 import (
 	"log"
+	"time"
 
+	"real-time-price-aggregator/internal/metrics"
 	"real-time-price-aggregator/internal/types"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -14,7 +16,7 @@ import (
 // Storage interface defines data persistence operations
 type Storage interface {
 	Save(record PriceRecord) error
-	Get(asset string) (*PriceRecord, error) // Add Get method
+	Get(asset string) (*PriceRecord, error)
 }
 
 // PriceRecord represents a price record to be stored in DynamoDB
@@ -27,7 +29,8 @@ type PriceRecord struct {
 
 // DynamoDBStorage implements the Storage interface
 type DynamoDBStorage struct {
-	client *dynamodb.DynamoDB
+	client     *dynamodb.DynamoDB
+	sysMetrics *metrics.SystemMetrics
 }
 
 // GetClient returns the DynamoDB client
@@ -45,12 +48,17 @@ func NewDynamoDBClient() *dynamodb.DynamoDB {
 }
 
 // NewDynamoDBStorage creates a new DynamoDB storage instance
-func NewDynamoDBStorage(client *dynamodb.DynamoDB) Storage {
-	return &DynamoDBStorage{client: client}
+func NewDynamoDBStorage(client *dynamodb.DynamoDB, sysMetrics *metrics.SystemMetrics) Storage {
+	return &DynamoDBStorage{
+		client:     client,
+		sysMetrics: sysMetrics,
+	}
 }
 
 // Save saves a price record to DynamoDB
 func (s *DynamoDBStorage) Save(record PriceRecord) error {
+	startTime := time.Now()
+
 	item, err := dynamodbattribute.MarshalMap(record)
 	if err != nil {
 		return err
@@ -61,16 +69,39 @@ func (s *DynamoDBStorage) Save(record PriceRecord) error {
 		Item:      item,
 	}
 
-	_, err = s.client.PutItem(input)
+	result, err := s.client.PutItem(input)
+
+	// 记录指标
+	if s.sysMetrics != nil {
+		duration := time.Since(startTime)
+		s.sysMetrics.RecordDynamoDBWriteLatency(duration)
+
+		// DynamoDB 的消耗单位通常可以从响应中获取
+		// 但在本地测试环境中可能没有准确的值
+		// 在生产环境中，应从 result 中提取实际消耗的单位
+		// 这里简单假设每次写入消耗 1 个单位
+		s.sysMetrics.RecordDynamoDBWriteUnits(1.0)
+
+		if err != nil {
+			s.sysMetrics.RecordDynamoDBError()
+		}
+	}
+
 	if err != nil {
 		log.Printf("Failed to save record for %s: %v", record.Asset, err)
 		return err
 	}
+
+	// 如果需要记录额外的指标，可以从 result 中提取信息
+	_ = result
+
 	return nil
 }
 
 // Get retrieves the latest price record for an asset from DynamoDB
 func (s *DynamoDBStorage) Get(asset string) (*PriceRecord, error) {
+	startTime := time.Now()
+
 	input := &dynamodb.QueryInput{
 		TableName:              aws.String("prices"),
 		KeyConditionExpression: aws.String("asset = :asset"),
@@ -82,6 +113,21 @@ func (s *DynamoDBStorage) Get(asset string) (*PriceRecord, error) {
 	}
 
 	result, err := s.client.Query(input)
+
+	// 记录指标
+	if s.sysMetrics != nil {
+		duration := time.Since(startTime)
+		s.sysMetrics.RecordDynamoDBReadLatency(duration)
+
+		// 类似于 Save 方法，在生产环境中应从 result 中提取实际的消耗单位
+		// 这里简单假设每次查询消耗 0.5 个单位
+		s.sysMetrics.RecordDynamoDBReadUnits(0.5)
+
+		if err != nil {
+			s.sysMetrics.RecordDynamoDBError()
+		}
+	}
+
 	if err != nil {
 		return nil, err
 	}
