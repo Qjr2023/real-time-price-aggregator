@@ -25,6 +25,8 @@ data "aws_ami" "amazon_linux_2023" {
   }
 }
 
+data "aws_caller_identity" "current" {}
+
 # security group, allow all traffic
 resource "aws_security_group" "price_aggregator_sg" {
   name        = "price-aggregator-sg"
@@ -264,18 +266,15 @@ resource "aws_lambda_function" "refresh_price" {
   runtime       = "go1.x"
   timeout       = 30
   memory_size   = 256
-
-  # Environment variables, including AWS credentials
+  role          = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/LabRole"
+  
+  # 环境变量
   environment {
     variables = {
       REDIS_ADDR           = "${aws_instance.redis.private_ip}:6379"
       EXCHANGE1_URL        = "http://${aws_instance.exchange1.private_ip}:8081/mock/ticker"
       EXCHANGE2_URL        = "http://${aws_instance.exchange2.private_ip}:8082/mock/ticker"
       EXCHANGE3_URL        = "http://${aws_instance.exchange3.private_ip}:8083/mock/ticker"
-      AWS_REGION           = var.region
-      AWS_ACCESS_KEY_ID    = var.access_key
-      AWS_SECRET_ACCESS_KEY = var.secret_key
-      AWS_SESSION_TOKEN    = var.session_token
     }
   }
 
@@ -312,7 +311,7 @@ resource "aws_api_gateway_method" "post_refresh" {
   rest_api_id   = aws_api_gateway_rest_api.price_api.id
   resource_id   = aws_api_gateway_resource.asset.id
   http_method   = "POST"
-  authorization_type = "NONE"
+  authorization = "NONE"
 }
 
 # API Gateway integration with Lambda
@@ -418,12 +417,6 @@ resource "aws_lambda_permission" "low_tier_permission" {
   function_name = aws_lambda_function.refresh_price.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.low_tier_refresh.arn
-}
-
-# Output API Gateway URL
-output "lambda_api_url" {
-  value = "${aws_api_gateway_deployment.api_deployment.invoke_url}/refresh/{asset}"
-  description = "URL for manual price refresh via Lambda"
 }
 
 # Output the public IPs of the instances
