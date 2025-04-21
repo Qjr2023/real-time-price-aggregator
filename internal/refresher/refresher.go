@@ -5,7 +5,9 @@ import (
 	"log"
 	"real-time-price-aggregator/internal/cache"
 	"real-time-price-aggregator/internal/fetcher"
+	"real-time-price-aggregator/internal/metrics"
 	"real-time-price-aggregator/internal/storage"
+
 	"sync"
 	"time"
 )
@@ -46,6 +48,7 @@ type Refresher struct {
 	mutex         sync.Mutex
 	isRunning     bool
 	supportedList []string
+	metrics       *metrics.MetricsService
 }
 
 // NewRefresher creates a new auto-refresher instance
@@ -54,6 +57,7 @@ func NewRefresher(
 	c cache.Cache,
 	s storage.Storage,
 	supportedList []string,
+	m *metrics.MetricsService,
 ) *Refresher {
 	return &Refresher{
 		fetcher:       f,
@@ -62,6 +66,7 @@ func NewRefresher(
 		assetTiers:    make(map[string]AssetTier),
 		stopChans:     make(map[string]chan struct{}),
 		supportedList: supportedList,
+		metrics:       m,
 	}
 }
 
@@ -150,9 +155,22 @@ func (r *Refresher) refreshLoop(asset string, tier AssetTier, stop <-chan struct
 
 // refreshAsset fetches the latest price for an asset and updates cache and storage
 func (r *Refresher) refreshAsset(asset string) {
+	// 获取资产的层级
+	tier := r.assetTiers[asset]
+	var tierString string
+	switch tier {
+	case HotTier:
+		tierString = "hot"
+	case MediumTier:
+		tierString = "medium"
+	case ColdTier:
+		tierString = "cold"
+	}
+
 	// Fetch the latest price
 	priceData, err := r.fetcher.FetchPrice(asset)
 	if err != nil {
+		r.metrics.RecordRefreshError(tierString)
 		log.Printf("Failed to refresh price for %s: %v", asset, err)
 		return
 	}
@@ -168,6 +186,8 @@ func (r *Refresher) refreshAsset(asset string) {
 		log.Printf("Failed to update storage for %s: %v", asset, err)
 	}
 
+	// 记录刷新操作
+	r.metrics.RecordRefresh(tierString, "auto")
 	log.Printf("Refreshed price for %s: %.2f", asset, priceData.Price)
 }
 
@@ -193,7 +213,38 @@ func (r *Refresher) ForceRefresh(asset string) error {
 		return fetcher.ErrAssetNotSupported
 	}
 
-	r.refreshAsset(asset)
+	// 获取资产的层级
+	tier := r.assetTiers[asset]
+	var tierString string
+	switch tier {
+	case HotTier:
+		tierString = "hot"
+	case MediumTier:
+		tierString = "medium"
+	case ColdTier:
+		tierString = "cold"
+	}
+
+	// 获取最新价格
+	priceData, err := r.fetcher.FetchPrice(asset)
+	if err != nil {
+		r.metrics.RecordRefreshError(tierString)
+		return err
+	}
+
+	// 更新缓存
+	if err := r.cache.Set(asset, priceData); err != nil {
+		log.Printf("Failed to update cache for %s: %v", asset, err)
+	}
+
+	// 更新存储
+	record := storage.ConvertPriceDataToRecord(priceData)
+	if err := r.storage.Save(record); err != nil {
+		log.Printf("Failed to update storage for %s: %v", asset, err)
+	}
+
+	// 记录刷新操作
+	r.metrics.RecordRefresh(tierString, "force")
 	return nil
 }
 
