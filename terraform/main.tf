@@ -1,5 +1,8 @@
 provider "aws" {
-  region = "us-west-2"
+  region     = var.region
+  access_key = var.access_key
+  secret_key = var.secret_key
+  token      = var.session_token
 }
 
 data "aws_ami" "amazon_linux_2023" {
@@ -22,25 +25,72 @@ data "aws_ami" "amazon_linux_2023" {
   }
 }
 
-# security group, allow all traffic
+# Security group for all instances
 resource "aws_security_group" "price_aggregator_sg" {
   name        = "price-aggregator-sg"
-  description = "Allow all traffic for price aggregator services"
+  description = "Allow traffic for price aggregator services"
 
-  # allow all inbound traffic
+  # HTTP access for API
+  ingress {
+    from_port   = 8080
+    to_port     = 8090
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTP access for price API and mock exchanges"
+  }
+
+  # Redis port
+  ingress {
+    from_port   = 6379
+    to_port     = 6379
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+    description = "Redis port"
+  }
+
+  # Prometheus port
+  ingress {
+    from_port   = 9090
+    to_port     = 9090
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Prometheus port"
+  }
+
+  # Grafana port
+  ingress {
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Grafana port"
+  }
+
+  # SSH
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "SSH access"
+  }
+
+  # Allow all internal traffic between instances
   ingress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    self        = true
+    description = "Allow all traffic between instances"
   }
 
-  # allow all outbound traffic
+  # Allow all outbound traffic
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
   }
 
   tags = {
@@ -48,24 +98,53 @@ resource "aws_security_group" "price_aggregator_sg" {
   }
 }
 
-# redis instance
+# DynamoDB Table
+resource "aws_dynamodb_table" "prices_table" {
+  name           = "prices"
+  billing_mode   = "PAY_PER_REQUEST"  # On-demand capacity
+  hash_key       = "asset"
+  range_key      = "timestamp"
+  table_class    = "STANDARD"
+
+  attribute {
+    name = "asset"
+    type = "S"
+  }
+
+  attribute {
+    name = "timestamp"
+    type = "N"
+  }
+
+  ttl {
+    attribute_name = "UpdatedAt"
+    enabled        = true
+  }
+
+  tags = {
+    Name        = "prices-table"
+    Environment = "production"
+  }
+}
+
+# Redis instance
 resource "aws_instance" "redis" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "t3.micro"
-  key_name               = "cs6650hw1b"
+  key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.price_aggregator_sg.id]
 
   user_data = <<-EOF
               #!/bin/bash
-              # update system
+              # Update system
               dnf update -y
-              # install docker
+              # Install docker
               dnf install -y docker
               systemctl enable docker
               systemctl start docker
               usermod -aG docker ec2-user
               
-              # run redis docker container
+              # Run redis docker container
               docker run -d -p 6379:6379 --name redis redis:latest
               EOF
 
@@ -78,7 +157,7 @@ resource "aws_instance" "redis" {
 resource "aws_instance" "exchange1" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "t3.micro"
-  key_name               = "cs6650hw1b"
+  key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.price_aggregator_sg.id]
 
   user_data = <<-EOF
@@ -89,12 +168,12 @@ resource "aws_instance" "exchange1" {
               systemctl start docker
               usermod -aG docker ec2-user
               
-              # clone repository
+              # Clone repository
               dnf install -y git
               git clone https://github.com/Qjr2023/real-time-price-aggregator.git
               cd real-time-price-aggregator
               
-              # build and run Exchange1
+              # Build and run Exchange1
               docker build -t exchange1 -f mocks/Dockerfile .
               docker run -d -p 8081:8081 exchange1 ./mock_server 8081 exchange1
               EOF
@@ -108,7 +187,7 @@ resource "aws_instance" "exchange1" {
 resource "aws_instance" "exchange2" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "t3.micro"
-  key_name               = "cs6650hw1b"
+  key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.price_aggregator_sg.id]
 
   user_data = <<-EOF
@@ -136,7 +215,7 @@ resource "aws_instance" "exchange2" {
 resource "aws_instance" "exchange3" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "t3.micro"
-  key_name               = "cs6650hw1b"
+  key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.price_aggregator_sg.id]
 
   user_data = <<-EOF
@@ -160,13 +239,11 @@ resource "aws_instance" "exchange3" {
   }
 }
 
-
-
 # API server instance
 resource "aws_instance" "api_server" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "t3.small"
-  key_name               = "cs6650hw1b"
+  key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.price_aggregator_sg.id]
 
   user_data = <<-EOF
@@ -181,57 +258,46 @@ resource "aws_instance" "api_server" {
               git clone https://github.com/Qjr2023/real-time-price-aggregator.git
               cd real-time-price-aggregator
               
-              # revise main.go to use environment variables
-              sed -i 's/Addr: "redis:6379"/Addr: os.Getenv("REDIS_ADDR")/g' cmd/main.go
-              sed -i 's/"http:\/\/exchange1:8081\/mock\/ticker"/os.Getenv("EXCHANGE1_URL")/g' cmd/main.go
-              sed -i 's/"http:\/\/exchange2:8082\/mock\/ticker"/os.Getenv("EXCHANGE2_URL")/g' cmd/main.go
-              sed -i 's/"http:\/\/exchange3:8083\/mock\/ticker"/os.Getenv("EXCHANGE3_URL")/g' cmd/main.go
-              
-              # create AWS credentials file
+              # Create AWS credentials directory
               mkdir -p /home/ec2-user/.aws
               cat > /home/ec2-user/.aws/credentials <<CREDENTIALS
               [default]
-              aws_access_key_id=your_access_key_id
-              aws_secret_access_key=your_secret_access_key
-              aws_session_token=your_session_token
+              aws_access_key_id=${var.access_key}
+              aws_secret_access_key=${var.secret_key}
+              aws_session_token=${var.session_token}
               CREDENTIALS
               
               cat > /home/ec2-user/.aws/config <<CONFIG
               [default]
-              region=us-west-2
+              region=${var.region}
               CONFIG
               
-              # setup permissions
+              # Setup permissions
               chmod 600 /home/ec2-user/.aws/credentials
               chmod 600 /home/ec2-user/.aws/config
-
-              # setup environment variables
-              export REDIS_ADDR="${aws_instance.redis.private_ip}:6379"
-              export EXCHANGE1_URL="http://${aws_instance.exchange1.private_ip}:8081/mock/ticker"
-              export EXCHANGE2_URL="http://${aws_instance.exchange2.private_ip}:8082/mock/ticker"
-              export EXCHANGE3_URL="http://${aws_instance.exchange3.private_ip}:8083/mock/ticker"
+              chown -R ec2-user:ec2-user /home/ec2-user/.aws
               
-              # build and run API server
+              # Create startup script
               cat > start_server.sh <<SCRIPT
               #!/bin/bash
               cd /home/ec2-user/real-time-price-aggregator
               
-              # setup environment variables
+              # Setup environment variables
               export REDIS_ADDR="${aws_instance.redis.private_ip}:6379"
               export EXCHANGE1_URL="http://${aws_instance.exchange1.private_ip}:8081/mock/ticker"
               export EXCHANGE2_URL="http://${aws_instance.exchange2.private_ip}:8082/mock/ticker"
               export EXCHANGE3_URL="http://${aws_instance.exchange3.private_ip}:8083/mock/ticker"
-              export AWS_REGION="us-west-2"
-
-              # build and run API server
+              export AWS_REGION="${var.region}"
+              
+              # Build and run API server
               docker build -t api-server -f Dockerfile .
-              docker run -d -p 8080:8080 \
+              docker run -d -p 8080:8080 \\
                 -v /home/ec2-user/.aws:/root/.aws:ro \\
                 -e REDIS_ADDR="\$REDIS_ADDR" \\
                 -e EXCHANGE1_URL="\$EXCHANGE1_URL" \\
                 -e EXCHANGE2_URL="\$EXCHANGE2_URL" \\
                 -e EXCHANGE3_URL="\$EXCHANGE3_URL" \\
-                -e AWS_REGION="us-west-2" \\
+                -e AWS_REGION="\$AWS_REGION" \\
                 api-server
               SCRIPT
               
@@ -243,7 +309,8 @@ resource "aws_instance" "api_server" {
     aws_instance.redis,
     aws_instance.exchange1,
     aws_instance.exchange2,
-    aws_instance.exchange3
+    aws_instance.exchange3,
+    aws_dynamodb_table.prices_table
   ]
 
   tags = {
@@ -251,7 +318,101 @@ resource "aws_instance" "api_server" {
   }
 }
 
-# output the public IPs of the instances
+# Monitoring instance
+resource "aws_instance" "monitoring" {
+  ami                    = data.aws_ami.amazon_linux_2023.id
+  instance_type          = "t3.small"
+  key_name               = var.key_name
+  vpc_security_group_ids = [aws_security_group.price_aggregator_sg.id]
+
+  user_data = <<-EOF
+              #!/bin/bash
+              dnf update -y
+              dnf install -y docker git
+              systemctl enable docker
+              systemctl start docker
+              usermod -aG docker ec2-user
+
+              git clone https://github.com/Qjr2023/real-time-price-aggregator.git
+              cd real-time-price-aggregator
+              
+              # 为Prometheus创建目录
+              mkdir -p /home/ec2-user/grafana_data
+              chmod 777 /home/ec2-user/grafana_data
+              mkdir -p /home/ec2-user/grafana/provisioning/datasources
+              mkdir -p /home/ec2-user/grafana/provisioning/dashboards
+              chmod -R 777 /home/ec2-user/grafana
+              
+              # 更新prometheus.yml
+              cat > /home/ec2-user/prometheus.yml <<PROMCONFIG
+              global:
+                scrape_interval: 15s
+                evaluation_interval: 15s
+
+              scrape_configs:
+                - job_name: 'price-aggregator'
+                  scrape_interval: 5s
+                  static_configs:
+                    - targets: ['${aws_instance.api_server.private_ip}:8080']
+
+                - job_name: 'prometheus'
+                  scrape_interval: 5s
+                  static_configs:
+                    - targets: ['localhost:9090']
+              PROMCONFIG
+              
+              # 创建数据源配置
+              cat > /home/ec2-user/grafana/provisioning/datasources/datasource.yml <<DATASOURCE
+              apiVersion: 1
+              datasources:
+                - name: Prometheus
+                  type: prometheus
+                  url: http://localhost:9090
+                  access: proxy
+                  isDefault: true
+              DATASOURCE
+              
+              # 创建仪表板配置
+              cat > /home/ec2-user/grafana/provisioning/dashboards/dashboard.yml <<DASHBOARD
+              apiVersion: 1
+              providers:
+                - name: 'default'
+                  orgId: 1
+                  folder: ''
+                  type: file
+                  disableDeletion: false
+                  updateIntervalSeconds: 10
+                  options:
+                    path: /etc/grafana/provisioning/dashboards
+              DASHBOARD
+              
+              # 复制仪表板JSON
+              cp grafana/dashboards/price_aggregator.json /home/ec2-user/grafana/provisioning/dashboards/
+              
+              # 运行Prometheus容器
+              docker run -d -p 9090:9090 \
+                -v /home/ec2-user/prometheus.yml:/etc/prometheus/prometheus.yml \
+                -v /home/ec2-user/prometheus_data:/prometheus \
+                --name prometheus \
+                prom/prometheus:latest
+              
+              # 运行Grafana容器
+              docker run -d -p 3000:3000 \
+                -v /home/ec2-user/grafana_data:/var/lib/grafana \
+                -v /home/ec2-user/grafana/provisioning:/etc/grafana/provisioning \
+                -e "GF_SECURITY_ADMIN_PASSWORD=admin" \
+                -e "GF_USERS_ALLOW_SIGN_UP=false" \
+                -e "GF_INSTALL_PLUGINS=grafana-piechart-panel" \
+                --name grafana \
+                grafana/grafana:latest
+              EOF
+
+  tags = {
+    Name = "price-aggregator-monitoring"
+  }
+}
+
+# Output the public IPs of the instances
 output "redis_ip" {
   value = aws_instance.redis.public_ip
 }
@@ -272,6 +433,18 @@ output "api_server_ip" {
   value = aws_instance.api_server.public_ip
 }
 
-output "connection_command" {
+output "api_health_check" {
   value = "curl http://${aws_instance.api_server.public_ip}:8080/health"
+}
+
+output "monitoring_ip" {
+  value = aws_instance.monitoring.public_ip
+}
+
+output "prometheus_url" {
+  value = "http://${aws_instance.monitoring.public_ip}:9090"
+}
+
+output "grafana_url" {
+  value = "http://${aws_instance.monitoring.public_ip}:3000 (login with admin/admin)"
 }
