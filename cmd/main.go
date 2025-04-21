@@ -54,6 +54,7 @@ func loadSymbols(filename string) []string {
 func main() {
 	// Load symbols from CSV
 	supportedList := loadSymbols("symbols.csv")
+	log.Printf("Loaded %d symbols", len(supportedAssets))
 
 	// Get Redis connection info from environment variables or use defaults
 	redisAddr := os.Getenv("REDIS_ADDR")
@@ -91,7 +92,7 @@ func main() {
 	}
 
 	// Initialize metrics services
-	// metricsService := metrics.NewMetricsService()
+	metricsService := metrics.NewMetricsService()
 	systemMetrics := metrics.NewSystemMetrics()
 
 	systemMetrics.StartCollecting(15 * time.Second)
@@ -101,7 +102,7 @@ func main() {
 		exchange1,
 		exchange2,
 		exchange3,
-	})
+	}, metricsService)
 
 	// Initialize Cache and Storage
 	priceCache := cache.NewRedisCache(redisClient)
@@ -113,6 +114,7 @@ func main() {
 		priceCache,
 		priceStorage,
 		supportedList,
+		metricsService,
 	)
 
 	// Assign refresh tiers to assets based on popularity (order in CSV)
@@ -129,6 +131,7 @@ func main() {
 		priceStorage,
 		priceRefresher,
 		supportedAssets,
+		metricsService,
 	)
 
 	// Set up routes
@@ -152,4 +155,5 @@ func main() {
 	if err := http.ListenAndServe(":8080", r); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+	log.Fatal(http.ListenAndServe(":8080", r))
 }

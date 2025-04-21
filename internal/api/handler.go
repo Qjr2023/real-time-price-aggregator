@@ -9,6 +9,7 @@ import (
 
 	"real-time-price-aggregator/internal/cache"
 	"real-time-price-aggregator/internal/fetcher"
+	"real-time-price-aggregator/internal/metrics"
 	"real-time-price-aggregator/internal/refresher"
 	"real-time-price-aggregator/internal/storage"
 	"real-time-price-aggregator/internal/types"
@@ -23,8 +24,15 @@ type Handler struct {
 	storage         storage.Storage
 	refresher       *refresher.Refresher
 	supportedAssets map[string]bool
+	metrics         *metrics.MetricsService
 	// Maximum age of data before forcing a refresh (for cold tier assets)
 	maxDataAge time.Duration
+}
+
+// statusRecorder 是一个自定义的 ResponseWriter，可以记录状态码
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
 }
 
 // NewHandler creates a new API handler
@@ -34,6 +42,7 @@ func NewHandler(
 	s storage.Storage,
 	r *refresher.Refresher,
 	supportedAssets map[string]bool,
+	m *metrics.MetricsService,
 ) *Handler {
 	return &Handler{
 		fetcher:         f,
@@ -41,17 +50,35 @@ func NewHandler(
 		storage:         s,
 		refresher:       r,
 		supportedAssets: supportedAssets,
+		metrics:         m,
 		maxDataAge:      5 * time.Minute, // Maximum acceptable age for cold tier data
 	}
+}
+
+// WriteHeader 覆盖 http.ResponseWriter 的方法，记录状态码
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
 }
 
 // GetPrice handles GET /prices/{asset}
 // This is now a purely "Query" operation in CQRS
 func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
+	startTime := time.Now()
+	// 创建一个响应记录器，捕获状态码
+	recorder := statusRecorder{w, http.StatusOK}
+
+	// 函数结束时记录请求
+	defer func() {
+		h.metrics.RecordAPIRequest("/prices", recorder.status)
+		h.metrics.ObserveAPIRequestDuration("/prices", time.Since(startTime))
+	}()
+
+	// 使用 recorder 代替 w 作为响应写入器
 	vars := mux.Vars(r)
 	symbol := vars["asset"]
 	if symbol == "" {
-		respondWithError(w, http.StatusBadRequest, "Asset symbol is required")
+		respondWithError(&recorder, http.StatusBadRequest, "Asset symbol is required")
 		return
 	}
 
@@ -77,6 +104,7 @@ func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
 
 	// Cache miss - try to get from storage and trigger refresh
 	if priceData == nil {
+		h.metrics.RecordCacheMiss()
 		// Try to get from storage
 		record, err := h.storage.Get(symbolLower)
 		if err != nil {
@@ -110,6 +138,7 @@ func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Cache hit - check if data is stale for a cold tier asset
 		// We don't need to check for hot/medium tier assets as they're auto-refreshed
+		h.metrics.RecordCacheHit()
 		tier := h.refresher.GetAssetTier(symbolLower)
 		if tier == refresher.ColdTier {
 			dataAge := time.Since(time.Unix(priceData.Timestamp, 0))
@@ -156,6 +185,7 @@ func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
 	case refresher.ColdTier:
 		tierString = "cold"
 	}
+	h.metrics.RecordAssetAccess(symbolLower, tierString)
 
 	priceResponse := priceData.ToResponseWithTier(tierString)
 	respondWithJSON(w, http.StatusOK, priceResponse)
@@ -164,6 +194,17 @@ func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
 // RefreshPrice handles POST /refresh/{asset}
 // This is a "Command" operation in CQRS
 func (h *Handler) RefreshPrice(w http.ResponseWriter, r *http.Request) {
+	startTime := time.Now()
+
+	// 创建一个响应记录器，捕获状态码
+	recorder := statusRecorder{w, http.StatusOK}
+
+	// 函数结束时记录请求
+	defer func() {
+		h.metrics.RecordAPIRequest("/refresh", recorder.status)
+		h.metrics.ObserveAPIRequestDuration("/refresh", time.Since(startTime))
+	}()
+
 	vars := mux.Vars(r)
 	symbol := vars["asset"]
 	if symbol == "" {
@@ -180,13 +221,29 @@ func (h *Handler) RefreshPrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 获取资产的层级
+	tier := h.refresher.GetAssetTier(symbolLower)
+	var tierString string
+	switch tier {
+	case refresher.HotTier:
+		tierString = "hot"
+	case refresher.MediumTier:
+		tierString = "medium"
+	case refresher.ColdTier:
+		tierString = "cold"
+	}
+
 	// Force a refresh through the refresher service
 	err := h.refresher.ForceRefresh(symbolLower)
 	if err != nil {
+		h.metrics.RecordRefreshError(tierString)
 		log.Printf("Failed to refresh price for %s: %v", symbolLower, err)
-		respondWithError(w, http.StatusInternalServerError, "Failed to refresh price")
+		respondWithError(&recorder, http.StatusInternalServerError, "Failed to refresh price")
 		return
 	}
+
+	// 记录成功刷新
+	h.metrics.RecordRefresh(tierString, "manual")
 
 	respondWithJSON(w, http.StatusOK, map[string]string{
 		"message": "Price for " + symbol + " refreshed",

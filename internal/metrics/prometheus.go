@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"strconv"
 	"sync"
 	"time"
 
@@ -167,7 +168,7 @@ func (m *MetricsService) GetCacheHitRate() float64 {
 
 // RecordAPIRequest records an API request
 func (m *MetricsService) RecordAPIRequest(endpoint string, status int) {
-	m.apiRequests.WithLabelValues(endpoint, string(status)).Inc()
+	m.apiRequests.WithLabelValues(endpoint, strconv.Itoa(status)).Inc()
 }
 
 // ObserveAPIRequestDuration records the duration of an API request

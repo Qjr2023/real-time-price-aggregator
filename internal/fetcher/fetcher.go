@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"real-time-price-aggregator/internal/circuitbreaker"
+	"real-time-price-aggregator/internal/metrics"
 	"real-time-price-aggregator/internal/types"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ type fetcher struct {
 	endpoints       []string
 	client          *http.Client
 	circuitBreakers map[string]*circuitbreaker.CircuitBreaker
+	metrics         *metrics.MetricsService
 }
 
 // mockResponse represents the response from a mock exchange
@@ -39,7 +41,7 @@ type mockResponse struct {
 }
 
 // NewFetcher creates a new Fetcher instance
-func NewFetcher(endpoints []string) Fetcher {
+func NewFetcher(endpoints []string, m *metrics.MetricsService) Fetcher {
 	// Initialize HTTP client with timeout
 	client := &http.Client{
 		Timeout: 5 * time.Second,
@@ -64,12 +66,21 @@ func NewFetcher(endpoints []string) Fetcher {
 		endpoints:       endpoints,
 		client:          client,
 		circuitBreakers: circuitBreakers,
+		metrics:         m,
 	}
 }
 
 // fetchFromEndpoint fetches price data from a single endpoint
 func (f *fetcher) fetchFromEndpoint(endpoint, symbol string) (*mockResponse, error) {
 	url := fmt.Sprintf("%s/%s", endpoint, symbol)
+
+	// 记录请求
+	f.metrics.RecordExchangeRequest(endpoint)
+	startTime := time.Now()
+
+	// 更新断路器状态指标
+	state := f.circuitBreakers[endpoint].GetState()
+	f.metrics.RecordCircuitBreakerState(endpoint, int(state))
 
 	// Execute the HTTP request with circuit breaker protection
 	var response *http.Response
@@ -89,10 +100,16 @@ func (f *fetcher) fetchFromEndpoint(endpoint, symbol string) (*mockResponse, err
 		return nil
 	})
 
+	// 记录请求持续时间
+	duration := time.Since(startTime)
+	f.metrics.ObserveExchangeRequestDuration(endpoint, duration)
+
 	if fetchErr != nil {
 		if fetchErr == circuitbreaker.ErrCircuitOpen {
+			f.metrics.RecordExchangeError(endpoint, "circuit_open")
 			return nil, fmt.Errorf("circuit open for endpoint %s", endpoint)
 		}
+		f.metrics.RecordExchangeError(endpoint, "request_error")
 		return nil, fetchErr
 	}
 
@@ -100,6 +117,7 @@ func (f *fetcher) fetchFromEndpoint(endpoint, symbol string) (*mockResponse, err
 
 	var mockResp mockResponse
 	if err := json.NewDecoder(response.Body).Decode(&mockResp); err != nil {
+		f.metrics.RecordExchangeError(endpoint, "decode_error")
 		return nil, err
 	}
 
