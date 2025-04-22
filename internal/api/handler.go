@@ -106,7 +106,7 @@ func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
 	case refresher.ColdTier:
 		tierString = "cold"
 	default:
-		tierString = "medium" // 默认为中等层级
+		tierString = "medium" // default to medium if not found
 	}
 	// Check if asset is supported
 	var priceData *types.PriceData
@@ -206,7 +206,7 @@ func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) WarmupCache() {
 	log.Println("Starting cache warmup...")
 
-	// 收集热门资产列表
+	// Get all hot assets from the refresher
 	hotAssets := []string{}
 	for asset, tier := range h.refresher.GetAllAssetTiers() {
 		if tier == refresher.HotTier {
@@ -221,14 +221,14 @@ func (h *Handler) WarmupCache() {
 
 	log.Printf("Warming up cache with %d hot assets", len(hotAssets))
 
-	// 批量获取数据
+	// Batch get hot assets from storage
 	records, err := h.storage.BatchGet(hotAssets)
 	if err != nil {
 		log.Printf("Cache warmup failed: %v", err)
 		return
 	}
 
-	// 填充缓存
+	// Warm up the cache with the fetched records
 	for asset, record := range records {
 		priceData := &types.PriceData{
 			Asset:     record.Asset,

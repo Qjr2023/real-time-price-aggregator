@@ -269,7 +269,7 @@ func (r *Refresher) GetAllAssetTiers() map[string]AssetTier {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	// 返回副本以避免并发问题
+	// Create a copy of the assetTiers map to avoid concurrent access issues
 	result := make(map[string]AssetTier)
 	for k, v := range r.assetTiers {
 		result[k] = v
