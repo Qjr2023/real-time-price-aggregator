@@ -9,6 +9,7 @@ import (
 	"real-time-price-aggregator/internal/metrics"
 	"real-time-price-aggregator/internal/types"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -128,15 +129,35 @@ func (f *fetcher) fetchFromEndpoint(endpoint, symbol string) (*mockResponse, err
 func (f *fetcher) FetchPrice(symbol string) (*types.PriceData, error) {
 	var responses []*mockResponse
 	var errors []error
+	var wg sync.WaitGroup
+	responseChan := make(chan *mockResponse, len(f.endpoints))
+	errorChan := make(chan error, len(f.endpoints))
 
-	// Fetch data from all endpoints
+	// Use a wait group to synchronize goroutines
 	for _, endpoint := range f.endpoints {
-		resp, err := f.fetchFromEndpoint(endpoint, symbol)
-		if err != nil {
-			errors = append(errors, err)
-			continue
-		}
+		wg.Add(1)
+		go func(ep string) {
+			defer wg.Done()
+			resp, err := f.fetchFromEndpoint(ep, symbol)
+			if err != nil {
+				errorChan <- err
+				return
+			}
+			responseChan <- resp
+		}(endpoint)
+	}
+
+	// Wait for all goroutines to finish
+	wg.Wait()
+	close(responseChan)
+	close(errorChan)
+
+	// Collect responses and errors
+	for resp := range responseChan {
 		responses = append(responses, resp)
+	}
+	for err := range errorChan {
+		errors = append(errors, err)
 	}
 
 	// Check if we have any valid responses

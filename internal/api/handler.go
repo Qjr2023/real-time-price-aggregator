@@ -14,6 +14,8 @@ import (
 	"real-time-price-aggregator/internal/storage"
 	"real-time-price-aggregator/internal/types"
 
+	"github.com/panjf2000/ants/v2"
+
 	"github.com/gorilla/mux"
 )
 
@@ -25,6 +27,7 @@ type Handler struct {
 	refresher       *refresher.Refresher
 	supportedAssets map[string]bool
 	metrics         *metrics.MetricsService
+	pool            *ants.Pool
 	// Maximum age of data before forcing a refresh (for cold tier assets)
 	maxDataAge time.Duration
 }
@@ -44,6 +47,7 @@ func NewHandler(
 	supportedAssets map[string]bool,
 	m *metrics.MetricsService,
 ) *Handler {
+	pool, _ := ants.NewPool(100) // Create a pool with 100 goroutines
 	return &Handler{
 		fetcher:         f,
 		cache:           c,
@@ -52,6 +56,7 @@ func NewHandler(
 		supportedAssets: supportedAssets,
 		metrics:         m,
 		maxDataAge:      5 * time.Minute, // Maximum acceptable age for cold tier data
+		pool:            pool,
 	}
 }
 
@@ -91,11 +96,20 @@ func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get price from cache
-	priceData, err := h.cache.Get(symbolLower)
+	// Check if asset is supported
+	var priceData *types.PriceData
+	var err error
+	err = h.pool.Submit(func() {
+		priceData, err = h.cache.Get(symbolLower)
+		if err != nil {
+			log.Printf("Failed to get price from cache for %s: %v", symbolLower, err)
+			respondWithError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+	})
 	if err != nil {
-		log.Printf("Failed to get price from cache for %s: %v", symbolLower, err)
-		respondWithError(w, http.StatusInternalServerError, "Internal server error")
+		log.Printf("Failed to submit task to pool: %v", err)
+		respondWithError(&recorder, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
