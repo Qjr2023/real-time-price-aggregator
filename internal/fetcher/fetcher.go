@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+var responsePool = sync.Pool{
+	New: func() interface{} {
+		return &mockResponse{}
+	},
+}
+
 // Error definitions
 var (
 	ErrAssetNotSupported = errors.New("asset not supported")
@@ -127,8 +133,8 @@ func (f *fetcher) fetchFromEndpoint(endpoint, symbol string) (*mockResponse, err
 
 // FetchPrice fetches the price for a symbol from mock exchanges and calculates a weighted average
 func (f *fetcher) FetchPrice(symbol string) (*types.PriceData, error) {
-	var responses []*mockResponse
-	var errors []error
+	responses := make([]*mockResponse, 0, len(f.endpoints))
+	errors := make([]error, 0, len(f.endpoints))
 	var wg sync.WaitGroup
 	responseChan := make(chan *mockResponse, len(f.endpoints))
 	errorChan := make(chan error, len(f.endpoints))
@@ -138,6 +144,8 @@ func (f *fetcher) FetchPrice(symbol string) (*types.PriceData, error) {
 		wg.Add(1)
 		go func(ep string) {
 			defer wg.Done()
+
+			// 使用对象池获取响应对象
 			resp, err := f.fetchFromEndpoint(ep, symbol)
 			if err != nil {
 				errorChan <- err

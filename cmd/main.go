@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -133,6 +134,7 @@ func main() {
 		supportedAssets,
 		metricsService,
 	)
+	handler.WarmupCache()
 
 	// Set up routes
 	r := mux.NewRouter()
@@ -149,6 +151,9 @@ func main() {
 
 	// Prometheus metrics endpoint
 	r.Handle("/metrics", promhttp.Handler())
+
+	// increase the GC percent to 200% for testing
+	debug.SetGCPercent(200)
 
 	// Start server
 	log.Println("Starting server on port 8080...")

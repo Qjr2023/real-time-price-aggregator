@@ -17,6 +17,7 @@ import (
 type Storage interface {
 	Save(record PriceRecord) error
 	Get(asset string) (*PriceRecord, error)
+	BatchGet(assets []string) (map[string]*PriceRecord, error)
 }
 
 // PriceRecord represents a price record to be stored in DynamoDB
@@ -144,6 +145,58 @@ func (s *DynamoDBStorage) Get(asset string) (*PriceRecord, error) {
 		return nil, err
 	}
 	return &record, nil
+}
+
+// dynamodb.go 修改
+// 添加批量获取方法
+func (s *DynamoDBStorage) BatchGet(assets []string) (map[string]*PriceRecord, error) {
+	startTime := time.Now()
+
+	// 构造BatchGetItem请求
+	keys := make([]map[string]*dynamodb.AttributeValue, 0, len(assets))
+	for _, asset := range assets {
+		keys = append(keys, map[string]*dynamodb.AttributeValue{
+			"asset": {S: aws.String(asset)},
+		})
+	}
+
+	input := &dynamodb.BatchGetItemInput{
+		RequestItems: map[string]*dynamodb.KeysAndAttributes{
+			"prices": {
+				Keys: keys,
+			},
+		},
+	}
+
+	result, err := s.client.BatchGetItem(input)
+
+	// 计算指标
+	if s.sysMetrics != nil {
+		duration := time.Since(startTime)
+		s.sysMetrics.RecordDynamoDBReadLatency(duration)
+		s.sysMetrics.RecordDynamoDBReadUnits(float64(len(assets)) * 0.5)
+		if err != nil {
+			s.sysMetrics.RecordDynamoDBError()
+		}
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// 处理结果
+	records := make(map[string]*PriceRecord)
+	if items, ok := result.Responses["prices"]; ok {
+		for _, item := range items {
+			var record PriceRecord
+			if err := dynamodbattribute.UnmarshalMap(item, &record); err != nil {
+				continue
+			}
+			records[record.Asset] = &record
+		}
+	}
+
+	return records, nil
 }
 
 // ConvertPriceDataToRecord converts a PriceData to a PriceRecord
