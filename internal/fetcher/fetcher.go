@@ -74,11 +74,11 @@ func NewFetcher(endpoints []string, m *metrics.MetricsService) Fetcher {
 func (f *fetcher) fetchFromEndpoint(endpoint, symbol string) (*mockResponse, error) {
 	url := fmt.Sprintf("%s/%s", endpoint, symbol)
 
-	// 记录请求
+	// Record the request
 	f.metrics.RecordExchangeRequest(endpoint)
 	startTime := time.Now()
 
-	// 更新断路器状态指标
+	// Check if the asset is supported
 	state := f.circuitBreakers[endpoint].GetState()
 	f.metrics.RecordCircuitBreakerState(endpoint, int(state))
 
@@ -100,7 +100,7 @@ func (f *fetcher) fetchFromEndpoint(endpoint, symbol string) (*mockResponse, err
 		return nil
 	})
 
-	// 记录请求持续时间
+	// Record the response time
 	duration := time.Since(startTime)
 	f.metrics.ObserveExchangeRequestDuration(endpoint, duration)
 

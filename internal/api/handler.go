@@ -29,7 +29,7 @@ type Handler struct {
 	maxDataAge time.Duration
 }
 
-// statusRecorder 是一个自定义的 ResponseWriter，可以记录状态码
+// statusRecorder is a custom http.ResponseWriter to capture the status code
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -55,7 +55,7 @@ func NewHandler(
 	}
 }
 
-// WriteHeader 覆盖 http.ResponseWriter 的方法，记录状态码
+// WriteHeader captures the status code
 func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
@@ -65,16 +65,16 @@ func (r *statusRecorder) WriteHeader(status int) {
 // This is now a purely "Query" operation in CQRS
 func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
-	// 创建一个响应记录器，捕获状态码
+	// create a response recorder to capture the status code
 	recorder := statusRecorder{w, http.StatusOK}
 
-	// 函数结束时记录请求
+	// when the function exits, record the request
 	defer func() {
 		h.metrics.RecordAPIRequest("/prices", recorder.status)
 		h.metrics.ObserveAPIRequestDuration("/prices", time.Since(startTime))
 	}()
 
-	// 使用 recorder 代替 w 作为响应写入器
+	// Extract the asset symbol from the URL
 	vars := mux.Vars(r)
 	symbol := vars["asset"]
 	if symbol == "" {
@@ -196,10 +196,10 @@ func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RefreshPrice(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 
-	// 创建一个响应记录器，捕获状态码
+	// create a response recorder to capture the status code
 	recorder := statusRecorder{w, http.StatusOK}
 
-	// 函数结束时记录请求
+	// when the function exits, record the request
 	defer func() {
 		h.metrics.RecordAPIRequest("/refresh", recorder.status)
 		h.metrics.ObserveAPIRequestDuration("/refresh", time.Since(startTime))
@@ -221,7 +221,7 @@ func (h *Handler) RefreshPrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 获取资产的层级
+	// Check if asset is supported
 	tier := h.refresher.GetAssetTier(symbolLower)
 	var tierString string
 	switch tier {
@@ -242,7 +242,7 @@ func (h *Handler) RefreshPrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 记录成功刷新
+	// Update cache and storage
 	h.metrics.RecordRefresh(tierString, "manual")
 
 	respondWithJSON(w, http.StatusOK, map[string]string{

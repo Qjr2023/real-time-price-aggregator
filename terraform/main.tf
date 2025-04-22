@@ -336,14 +336,14 @@ resource "aws_instance" "monitoring" {
               git clone https://github.com/Qjr2023/real-time-price-aggregator.git
               cd real-time-price-aggregator
               
-              # 为Prometheus创建目录
+              # create directories for Prometheus and Grafana
               mkdir -p /home/ec2-user/grafana_data
               chmod 777 /home/ec2-user/grafana_data
               mkdir -p /home/ec2-user/grafana/provisioning/datasources
               mkdir -p /home/ec2-user/grafana/provisioning/dashboards
               chmod -R 777 /home/ec2-user/grafana
               
-              # 更新prometheus.yml
+              # update Prometheus config
               cat > /home/ec2-user/prometheus.yml <<PROMCONFIG
               global:
                 scrape_interval: 15s
@@ -361,7 +361,7 @@ resource "aws_instance" "monitoring" {
                     - targets: ['localhost:9090']
               PROMCONFIG
               
-              # 创建数据源配置
+              # create Grafana datasource config
               cat > /home/ec2-user/grafana/provisioning/datasources/datasource.yml <<DATASOURCE
               apiVersion: 1
               datasources:
@@ -372,7 +372,7 @@ resource "aws_instance" "monitoring" {
                   isDefault: true
               DATASOURCE
               
-              # 创建仪表板配置
+              # create Grafana dashboard config
               cat > /home/ec2-user/grafana/provisioning/dashboards/dashboard.yml <<DASHBOARD
               apiVersion: 1
               providers:
@@ -386,17 +386,17 @@ resource "aws_instance" "monitoring" {
                     path: /etc/grafana/provisioning/dashboards
               DASHBOARD
               
-              # 复制仪表板JSON
+              # copy Grafana dashboard JSON
               cp grafana/dashboards/price_aggregator.json /home/ec2-user/grafana/provisioning/dashboards/
               
-              # 运行Prometheus容器
+              # run Prometheus container
               docker run -d -p 9090:9090 \
                 -v /home/ec2-user/prometheus.yml:/etc/prometheus/prometheus.yml \
                 -v /home/ec2-user/prometheus_data:/prometheus \
                 --name prometheus \
                 prom/prometheus:latest
               
-              # 运行Grafana容器
+              # run Grafana container
               docker run -d -p 3000:3000 \
                 -v /home/ec2-user/grafana_data:/var/lib/grafana \
                 -v /home/ec2-user/grafana/provisioning:/etc/grafana/provisioning \
