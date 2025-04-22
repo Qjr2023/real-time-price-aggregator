@@ -771,12 +771,12 @@ output "post_health_check" {
 }
 
 output "get_example" { 
-  value       = "curl http://${aws_lb.main.dns_name}/prices/btc" 
+  value       = "curl http://${aws_lb.main.dns_name}/prices/asset11" 
   description = "Example GET request" 
 }
 
 output "post_example" { 
-  value       = "curl -X POST http://${aws_lb.main.dns_name}/refresh/btc" 
+  value       = "curl -X POST http://${aws_lb.main.dns_name}/refresh/asset11" 
   description = "Example POST request" 
 }
 

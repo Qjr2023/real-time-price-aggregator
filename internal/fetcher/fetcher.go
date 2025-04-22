@@ -145,7 +145,7 @@ func (f *fetcher) FetchPrice(symbol string) (*types.PriceData, error) {
 		go func(ep string) {
 			defer wg.Done()
 
-			// 使用对象池获取响应对象
+			// Check if the asset is supported
 			resp, err := f.fetchFromEndpoint(ep, symbol)
 			if err != nil {
 				errorChan <- err

@@ -147,12 +147,11 @@ func (s *DynamoDBStorage) Get(asset string) (*PriceRecord, error) {
 	return &record, nil
 }
 
-// dynamodb.go 修改
-// 添加批量获取方法
+// BatchGet retrieves multiple price records for a list of assets from DynamoDB
 func (s *DynamoDBStorage) BatchGet(assets []string) (map[string]*PriceRecord, error) {
 	startTime := time.Now()
 
-	// 构造BatchGetItem请求
+	// build the keys for the batch get
 	keys := make([]map[string]*dynamodb.AttributeValue, 0, len(assets))
 	for _, asset := range assets {
 		keys = append(keys, map[string]*dynamodb.AttributeValue{
@@ -170,7 +169,7 @@ func (s *DynamoDBStorage) BatchGet(assets []string) (map[string]*PriceRecord, er
 
 	result, err := s.client.BatchGetItem(input)
 
-	// 计算指标
+	// record metrics
 	if s.sysMetrics != nil {
 		duration := time.Since(startTime)
 		s.sysMetrics.RecordDynamoDBReadLatency(duration)
@@ -184,7 +183,7 @@ func (s *DynamoDBStorage) BatchGet(assets []string) (map[string]*PriceRecord, er
 		return nil, err
 	}
 
-	// 处理结果
+	// check for unprocessed keys
 	records := make(map[string]*PriceRecord)
 	if items, ok := result.Responses["prices"]; ok {
 		for _, item := range items {

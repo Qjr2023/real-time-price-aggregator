@@ -7,7 +7,6 @@ terraform/terraform.tfstate
 terraform/terraform.tfvars
 terraform/terraform.tfvars.json
 terraform/terraform.tfstate.backup
-jmeter_data/*
 *.txt
 *.log
 *.jtl
