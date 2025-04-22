@@ -17,11 +17,14 @@ rule_files:
 
 # A scrape configuration containing exactly one endpoint to scrape: our price aggregator service
 scrape_configs:
-  - job_name: 'price-aggregator'
+  - job_name: 'price-aggregator-get'
     scrape_interval: 5s
     static_configs:
-      - targets: ['server:8080']
-
+      - targets: ['${aws_instance.get_server.private_ip}:8080']
+  - job_name: 'price-aggregator-post'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['${aws_instance.post_server.private_ip}:8080']
   - job_name: 'prometheus'
     scrape_interval: 5s
     static_configs:
