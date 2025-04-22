@@ -13,7 +13,7 @@ import (
 // Cache interface defines caching operations
 type Cache interface {
 	Get(key string) (*types.PriceData, error)
-	Set(key string, data *types.PriceData) error
+	Set(key string, data *types.PriceData, tierType string) error
 }
 
 // RedisCache implements the Cache interface using Redis
@@ -45,11 +45,25 @@ func (c *RedisCache) Get(key string) (*types.PriceData, error) {
 }
 
 // Set stores price data in Redis with a TTL
-func (c *RedisCache) Set(key string, data *types.PriceData) error {
+func (c *RedisCache) Set(key string, data *types.PriceData, tierType string) error {
 	ctx := context.Background()
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	return c.client.Set(ctx, key, dataBytes, 5*time.Minute).Err()
+
+	// Determine TTL based on tier type
+	var ttl time.Duration
+	switch tierType {
+	case "hot":
+		ttl = 10 * time.Second // hot assets short TTL
+	case "medium":
+		ttl = 1 * time.Minute // midium assets medium TTL
+	case "cold":
+		ttl = 5 * time.Minute // cold assets long TTL
+	default:
+		ttl = 5 * time.Minute
+	}
+
+	return c.client.Set(ctx, key, dataBytes, ttl).Err()
 }

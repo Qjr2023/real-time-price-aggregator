@@ -176,7 +176,7 @@ func (r *Refresher) refreshAsset(asset string) {
 	}
 
 	// Update cache
-	if err := r.cache.Set(asset, priceData); err != nil {
+	if err := r.cache.Set(asset, priceData, tierString); err != nil {
 		log.Printf("Failed to update cache for %s: %v", asset, err)
 	}
 
@@ -233,7 +233,7 @@ func (r *Refresher) ForceRefresh(asset string) error {
 	}
 
 	// update cache
-	if err := r.cache.Set(asset, priceData); err != nil {
+	if err := r.cache.Set(asset, priceData, tierString); err != nil {
 		log.Printf("Failed to update cache for %s: %v", asset, err)
 	}
 
@@ -262,4 +262,17 @@ func max(x, y int) int {
 		return x
 	}
 	return y
+}
+
+// refresher.go
+func (r *Refresher) GetAllAssetTiers() map[string]AssetTier {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	// 返回副本以避免并发问题
+	result := make(map[string]AssetTier)
+	for k, v := range r.assetTiers {
+		result[k] = v
+	}
+	return result
 }

@@ -96,20 +96,25 @@ func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tier := h.refresher.GetAssetTier(symbolLower)
+	var tierString string
+	switch tier {
+	case refresher.HotTier:
+		tierString = "hot"
+	case refresher.MediumTier:
+		tierString = "medium"
+	case refresher.ColdTier:
+		tierString = "cold"
+	default:
+		tierString = "medium" // 默认为中等层级
+	}
 	// Check if asset is supported
 	var priceData *types.PriceData
 	var err error
-	err = h.pool.Submit(func() {
-		priceData, err = h.cache.Get(symbolLower)
-		if err != nil {
-			log.Printf("Failed to get price from cache for %s: %v", symbolLower, err)
-			respondWithError(w, http.StatusInternalServerError, "Internal server error")
-			return
-		}
-	})
+	priceData, err = h.cache.Get(symbolLower)
 	if err != nil {
-		log.Printf("Failed to submit task to pool: %v", err)
-		respondWithError(&recorder, http.StatusInternalServerError, "Internal server error")
+		log.Printf("Failed to get price from cache for %s: %v", symbolLower, err)
+		respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -130,6 +135,9 @@ func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
 		if record == nil {
 			// Neither in cache nor storage - trigger refresh
 			needsRefresh = true
+			if err := h.cache.Set(symbolLower, priceData, tierString); err != nil {
+				log.Printf("Failed to update cache from storage for %s: %v", symbolLower, err)
+			}
 		} else {
 			// Found in storage but not in cache - convert and check age
 			priceData = &types.PriceData{
@@ -139,7 +147,7 @@ func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Update cache with storage data
-			if err := h.cache.Set(symbolLower, priceData); err != nil {
+			if err := h.cache.Set(symbolLower, priceData, tierString); err != nil {
 				log.Printf("Failed to update cache from storage for %s: %v", symbolLower, err)
 			}
 
@@ -189,20 +197,51 @@ func (h *Handler) GetPrice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert to response format with formatted timestamp and time ago
-	tier := h.refresher.GetAssetTier(symbolLower)
-	var tierString string
-	switch tier {
-	case refresher.HotTier:
-		tierString = "hot"
-	case refresher.MediumTier:
-		tierString = "medium"
-	case refresher.ColdTier:
-		tierString = "cold"
-	}
 	h.metrics.RecordAssetAccess(symbolLower, tierString)
 
 	priceResponse := priceData.ToResponseWithTier(tierString)
 	respondWithJSON(w, http.StatusOK, priceResponse)
+}
+
+func (h *Handler) WarmupCache() {
+	log.Println("Starting cache warmup...")
+
+	// 收集热门资产列表
+	hotAssets := []string{}
+	for asset, tier := range h.refresher.GetAllAssetTiers() {
+		if tier == refresher.HotTier {
+			hotAssets = append(hotAssets, asset)
+		}
+	}
+
+	if len(hotAssets) == 0 {
+		log.Println("No hot assets found for cache warmup")
+		return
+	}
+
+	log.Printf("Warming up cache with %d hot assets", len(hotAssets))
+
+	// 批量获取数据
+	records, err := h.storage.BatchGet(hotAssets)
+	if err != nil {
+		log.Printf("Cache warmup failed: %v", err)
+		return
+	}
+
+	// 填充缓存
+	for asset, record := range records {
+		priceData := &types.PriceData{
+			Asset:     record.Asset,
+			Price:     record.Price,
+			Timestamp: record.Timestamp,
+		}
+
+		if err := h.cache.Set(asset, priceData, "hot"); err != nil {
+			log.Printf("Failed to warm up cache for %s: %v", asset, err)
+		}
+	}
+
+	log.Printf("Cache warmed up with %d hot assets", len(records))
 }
 
 // RefreshPrice handles POST /refresh/{asset}
