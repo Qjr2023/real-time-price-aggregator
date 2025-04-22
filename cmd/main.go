@@ -95,7 +95,7 @@ func main() {
 	metricsService := metrics.NewMetricsService()
 	systemMetrics := metrics.NewSystemMetrics()
 
-	systemMetrics.StartCollecting(15 * time.Second)
+	systemMetrics.StartCollecting(5 * time.Second)
 
 	// Initialize Fetcher with environment-specific URLs
 	priceFetcher := fetcher.NewFetcher([]string{

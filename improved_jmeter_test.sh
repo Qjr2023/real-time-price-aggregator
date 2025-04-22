@@ -1,33 +1,33 @@
 #!/bin/bash
 # improved_jmeter_test.sh
-# 这个脚本使用 symbols.csv 中的实际资产来运行 JMeter 测试
+# This script is designed to create a JMeter test plan for testing the price aggregator service.
 
-# 检查 symbols.csv 文件是否存在
+# check if JMeter is installed
 if [ ! -f "symbols.csv" ]; then
     echo "错误: symbols.csv 文件不存在。请确保它在当前目录中。"
     exit 1
 fi
 
-# 从 symbols.csv 文件中提取一些资产
+# fetch the latest symbols.csv file
 echo "正在从 symbols.csv 提取资产..."
-# 跳过标题行，获取第一个资产作为热门资产
+# skip the first line and get the first asset as hot asset
 HOT_ASSET=$(tail -n +2 symbols.csv | head -n 1 | cut -d ',' -f 1)
-# 获取第21个资产作为中等热门资产
+# acquire the 21st asset as medium asset
 MEDIUM_ASSET=$(tail -n +22 symbols.csv | head -n 1 | cut -d ',' -f 1)
-# 获取第201个资产作为冷门资产
+# acquire the 201st asset as cold asset
 COLD_ASSET=$(tail -n +202 symbols.csv | head -n 1 | cut -d ',' -f 1)
 
-# 如果提取失败或为空，使用默认值
+# if any of the assets are not set, use default values
 if [ -z "$HOT_ASSET" ]; then HOT_ASSET="asset1"; fi
 if [ -z "$MEDIUM_ASSET" ]; then MEDIUM_ASSET="asset21"; fi
 if [ -z "$COLD_ASSET" ]; then COLD_ASSET="asset201"; fi
 
-echo "选择的测试资产:"
-echo "热门资产: $HOT_ASSET"
-echo "中等热门资产: $MEDIUM_ASSET" 
-echo "冷门资产: $COLD_ASSET"
+echo "test assets:"
+echo "hot assets: $HOT_ASSET"
+echo "mid assets: $MEDIUM_ASSET" 
+echo "cold assets: $COLD_ASSET"
 
-# 创建一个临时的 JMeter 测试计划文件
+# create JMeter test plan
 cat > adaptive_test_plan.jmx << EOL
 <?xml version="1.0" encoding="UTF-8"?>
 <jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
@@ -257,10 +257,10 @@ cat > adaptive_test_plan.jmx << EOL
 </jmeterTestPlan>
 EOL
 
-# 执行非 GUI 模式的 JMeter 测试
-echo "正在启动 JMeter 测试..."
+# run JMeter test
+echo "Running JMeter test..."
 jmeter -n -t adaptive_test_plan.jmx -l test_results.jtl
 
-# 打印结果摘要
-echo "测试完成。结果保存在 test_results.jtl"
-echo "你可以通过 JMeter GUI 中的 View Results Tree 或 Summary Report 查看详细结果。"
+# print results
+echo "Test completed, check results in test_results.jtl"
+echo "you can check the detailed results in JMeter GUI (View Results Tree or Summary Report)"

@@ -271,7 +271,7 @@
         "pluginVersion": "7.2.0",
         "targets": [
           {
-            "expr": "price_cache_hits_total / (price_cache_hits_total + price_cache_misses_total)",
+            "expr": "price_cache_hits_total / (price_cache_hits_total + price_cache_misses_total) or vector(0)",
             "interval": "",
             "legendFormat": "Cache Hit Rate",
             "refId": "A"
@@ -521,7 +521,7 @@
         "steppedLine": false,
         "targets": [
           {
-            "expr": "sum(price_circuit_breaker_state) by (exchange)",
+            "expr": "price_circuit_breaker_state",
             "interval": "",
             "legendFormat": "{{exchange}}",
             "refId": "A"
@@ -723,10 +723,16 @@
             "refId": "B"
           },
           {
-            "expr": "price_system_disk_usage_percent",
+            "expr": "price_system_disk_usage_percent{path=\"/\"}",
             "interval": "",
-            "legendFormat": "Disk Usage",
+            "legendFormat": "Disk Usage /",
             "refId": "C"
+          },
+          {
+            "expr": "price_system_disk_usage_percent{path=\"/data\"}",
+            "interval": "",
+            "legendFormat": "Disk Usage /data",
+            "refId": "D"
           }
         ],
         "thresholds": [],

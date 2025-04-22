@@ -155,7 +155,7 @@ func (r *Refresher) refreshLoop(asset string, tier AssetTier, stop <-chan struct
 
 // refreshAsset fetches the latest price for an asset and updates cache and storage
 func (r *Refresher) refreshAsset(asset string) {
-	// 获取资产的层级
+	// acquire lock to prevent concurrent access
 	tier := r.assetTiers[asset]
 	var tierString string
 	switch tier {
@@ -186,7 +186,7 @@ func (r *Refresher) refreshAsset(asset string) {
 		log.Printf("Failed to update storage for %s: %v", asset, err)
 	}
 
-	// 记录刷新操作
+	// Record the refresh operation
 	r.metrics.RecordRefresh(tierString, "auto")
 	log.Printf("Refreshed price for %s: %.2f", asset, priceData.Price)
 }
@@ -213,7 +213,7 @@ func (r *Refresher) ForceRefresh(asset string) error {
 		return fetcher.ErrAssetNotSupported
 	}
 
-	// 获取资产的层级
+	// acquire lock to prevent concurrent access
 	tier := r.assetTiers[asset]
 	var tierString string
 	switch tier {
@@ -225,25 +225,25 @@ func (r *Refresher) ForceRefresh(asset string) error {
 		tierString = "cold"
 	}
 
-	// 获取最新价格
+	// Fetch the latest price
 	priceData, err := r.fetcher.FetchPrice(asset)
 	if err != nil {
 		r.metrics.RecordRefreshError(tierString)
 		return err
 	}
 
-	// 更新缓存
+	// update cache
 	if err := r.cache.Set(asset, priceData); err != nil {
 		log.Printf("Failed to update cache for %s: %v", asset, err)
 	}
 
-	// 更新存储
+	// update storage
 	record := storage.ConvertPriceDataToRecord(priceData)
 	if err := r.storage.Save(record); err != nil {
 		log.Printf("Failed to update storage for %s: %v", asset, err)
 	}
 
-	// 记录刷新操作
+	// record the refresh operation
 	r.metrics.RecordRefresh(tierString, "force")
 	return nil
 }

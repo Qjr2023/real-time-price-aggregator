@@ -65,22 +65,24 @@ func (s *DynamoDBStorage) Save(record PriceRecord) error {
 	}
 
 	input := &dynamodb.PutItemInput{
-		TableName: aws.String("prices"),
-		Item:      item,
+		TableName:              aws.String("prices"),
+		Item:                   item,
+		ReturnConsumedCapacity: aws.String("TOTAL"), // ensure we get consumed capacity
 	}
 
 	result, err := s.client.PutItem(input)
 
-	// 记录指标
+	// record metrics
 	if s.sysMetrics != nil {
 		duration := time.Since(startTime)
 		s.sysMetrics.RecordDynamoDBWriteLatency(duration)
 
-		// DynamoDB 的消耗单位通常可以从响应中获取
-		// 但在本地测试环境中可能没有准确的值
-		// 在生产环境中，应从 result 中提取实际消耗的单位
-		// 这里简单假设每次写入消耗 1 个单位
-		s.sysMetrics.RecordDynamoDBWriteUnits(1.0)
+		// extract actual consumed capacity units from result
+		if result.ConsumedCapacity != nil {
+			s.sysMetrics.RecordDynamoDBWriteUnits(*result.ConsumedCapacity.CapacityUnits)
+		} else {
+			s.sysMetrics.RecordDynamoDBWriteUnits(1.0) // fallback value
+		}
 
 		if err != nil {
 			s.sysMetrics.RecordDynamoDBError()
@@ -91,9 +93,6 @@ func (s *DynamoDBStorage) Save(record PriceRecord) error {
 		log.Printf("Failed to save record for %s: %v", record.Asset, err)
 		return err
 	}
-
-	// 如果需要记录额外的指标，可以从 result 中提取信息
-	_ = result
 
 	return nil
 }
@@ -108,20 +107,24 @@ func (s *DynamoDBStorage) Get(asset string) (*PriceRecord, error) {
 		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
 			":asset": {S: aws.String(asset)},
 		},
-		ScanIndexForward: aws.Bool(false), // Get the latest record (descending order)
-		Limit:            aws.Int64(1),    // Only need the most recent record
+		ScanIndexForward:       aws.Bool(false),
+		Limit:                  aws.Int64(1),
+		ReturnConsumedCapacity: aws.String("TOTAL"), // ensure we get consumed capacity
 	}
 
 	result, err := s.client.Query(input)
 
-	// 记录指标
+	// record metrics
 	if s.sysMetrics != nil {
 		duration := time.Since(startTime)
 		s.sysMetrics.RecordDynamoDBReadLatency(duration)
 
-		// 类似于 Save 方法，在生产环境中应从 result 中提取实际的消耗单位
-		// 这里简单假设每次查询消耗 0.5 个单位
-		s.sysMetrics.RecordDynamoDBReadUnits(0.5)
+		// extract actual consumed capacity units from result
+		if result.ConsumedCapacity != nil {
+			s.sysMetrics.RecordDynamoDBReadUnits(*result.ConsumedCapacity.CapacityUnits)
+		} else {
+			s.sysMetrics.RecordDynamoDBReadUnits(0.5) // fallback value
+		}
 
 		if err != nil {
 			s.sysMetrics.RecordDynamoDBError()
