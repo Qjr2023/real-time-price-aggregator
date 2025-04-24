@@ -8,18 +8,25 @@ This system fetches prices for financial assets (e.g., BTC, ETH) from multiple m
 
 **Key Features:**
 - High-throughput API fetchers from three mock exchanges
-- Redis for real-time price caching
+- Redis for real-time price caching with tier-specific TTLs
 - DynamoDB for historical price storage
-- Fault-tolerant and horizontally scalable microservices
-- Tested with Apache JMeter for load and latency
-- Supports 10,000 assets loaded from `symbols.csv`
+- Fault-tolerant with circuit breaker pattern
+- Prometheus + Grafana for comprehensive system metrics
+- Tiered automatic refresh based on asset popularity
+- Supports 1000 assets loaded from `symbols.csv`
 
-**Key Changes (Updated Design):**
-- `GET /prices/{asset}` now retrieves prices directly from Redis cache (no fetcher calls).
-- Assets are validated against a predefined list in `symbols.csv` (10,000 assets).
-- Manual `POST /refresh/{asset}` for price refresh, with plans for future automation.
+**Key Implementation:**
+- `GET /prices/{asset}` retrieves prices directly from Redis cache with fallback to DynamoDB
+- Assets are validated against a predefined list in `symbols.csv` (1000 assets)
+- Automatic tiered refresh mechanism:
+  - Hot assets (top 20): Every 5 seconds
+  - Medium assets (next 180): Every 30 seconds
+  - Cold assets (remaining 800): Every 5 minutes
+- Manual `POST /refresh/{asset}` for on-demand price refresh
 
 ## 🏗️ System Architecture
+
+![System Architecture](screenshot_for_deploy/System_architecture.jpeg)
 
 ### Mock Exchanges
 The system simulates three exchanges to mimic real-world trading platforms:
@@ -27,12 +34,13 @@ The system simulates three exchanges to mimic real-world trading platforms:
 - **Exchange 2**: Runs on `http://localhost:8082/mock/ticker/{symbol}`
 - **Exchange 3**: Runs on `http://localhost:8083/mock/ticker/{symbol}`
 
-Each exchange supports 10,000 assets defined in `symbols.csv` and provides mock price and timestamp data.
+Each exchange supports 1000 assets defined in `symbols.csv` and provides mock price and timestamp data.
 
 ### Data Flow
-1. The main server fetches price data from the three mock exchanges (via `POST /refresh/{asset}`).
+1. The refresher service automatically fetches price data from the three mock exchanges at intervals based on asset tier.
 2. Prices are stored in Redis (cache) and DynamoDB (persistent storage).
 3. Users query the aggregated price via `GET /prices/{asset}`, which retrieves data from Redis.
+4. For cold tier assets or cache misses, the system can force a refresh to ensure fresh data.
 
 ### Data Structure
 #### DynamoDB Table
@@ -52,20 +60,48 @@ Each exchange supports 10,000 assets defined in `symbols.csv` and provides mock 
 - **Backend**: Go (microservices)
 - **Cache**: Redis
 - **Database**: DynamoDB (via AWS DynamoDB)
+- **Monitoring**: Prometheus + Grafana
 - **Testing**: Apache JMeter (for load and latency testing)
-- **Deployment**: Docker and Docker Compose
+- **Deployment**: Docker Compose (local), Terraform (AWS)
 
-**Note**: Kafka, MongoDB, and Prometheus + Grafana were part of the initial design but were omitted to simplify the project.
+## 📊 Performance Goals & Results
+
+### Performance Targets
+- **Latency**: 
+  - P95 (95th percentile) GET request: < 80ms
+  - P99 (99th percentile) GET request: < 100ms
+- **Throughput**: 1000+ requests/second
+- **API error rate**: < 0.1%
+- **CPU usage**: < 70%
+- **Memory usage**: < 80%
+- **Redis cache hit rate**: > 95%
+
+### Achieved Performance
+- **Throughput**: ~8,000 requests/second under optimal conditions
+- **Latency**: Met P95/P99 targets for hot and medium assets
+- **Cache hit rate**: Near 100% after tier-specific TTL implementation
+- **Scaling limit**: ~5,500 concurrent requests for cold-tier assets
+
+![Test Results](test_results/final_test_3.png)
 
 ## ⚖️ Design Trade-offs
-- **Latency vs Cost**: Caching with Redis minimizes latency, at the expense of slight data staleness (5-minute TTL).
-- **Availability vs Consistency**: Prioritizes availability—if Redis cache misses, returns 404.
-- **Scalability**: Supports 10,000 assets, with plans for distributed processing (e.g., Kafka) in the future.
+- **Lambda vs. EC2 for Automatic Refreshes**: 
+  - Considered using AWS Lambda for POST/refresh operations
+  - Rejected due to CloudWatch's minimum interval of 1 minute (incompatible with 5s/30s refresh requirements) and cost considerations
+  - Implemented using Go tickers on EC2 instances instead
 
-## 📊 Performance Goals
-- Handle 1000+ concurrent queries/sec
-- Sub-100ms response time for hot assets
-- >90% Redis cache hit rate under load
+- **Auto Scaling Group Implementation**:
+  - Considered implementing ASG for dynamic scaling
+  - Postponed due to system not yet reaching consistent bottlenecks and implementation complexity
+
+- **Kafka Integration**:
+  - Considered using Kafka for decoupling components
+  - Rejected due to potential data freshness issues when users request real-time prices
+  - The Redis/DynamoDB solution proved sufficient for current scale
+
+- **Throughput vs. Latency**:
+  - Current system configuration balances throughput and latency
+  - Primary optimization target is response time, with throughput as secondary consideration
 
 ## 🚀 How to Run
 
@@ -83,6 +119,7 @@ Each exchange supports 10,000 assets defined in `symbols.csv` and provides mock 
    - On macOS: `brew install curl`
    - On Ubuntu: `sudo apt-get install curl`
    - On Windows (WSL): `sudo apt-get install curl`
+6. Install [Terraform](https://developer.hashicorp.com/terraform/downloads) (for AWS deployment)
 
 ### Setup Instructions
 1. **Clone the Repository**:
@@ -91,17 +128,17 @@ Each exchange supports 10,000 assets defined in `symbols.csv` and provides mock 
    cd real-time-price-aggregator
 
 2. **Prepare `symbols.csv`**:
-   - Ensure `symbols.csv` exists in the project root with 10,000 asset symbols:
+   - Ensure `symbols.csv` exists in the project root with 1000 asset symbols:
      ```csv
      symbol
-     btcusdt
-     ethusdt
-     adausdt
+     asset1
+     asset2
+     asset3
      ...
-     symbol10000
+     symbol1000
      ```
 
-3. **Start All Services with Docker Compose**:
+3. **Start All Services with Docker Compose (Local Deployment)**:
    ```bash
    docker-compose up --build
    ```
@@ -114,7 +151,7 @@ Each exchange supports 10,000 assets defined in `symbols.csv` and provides mock 
 ### API Design
 #### Endpoints
 - **GET /prices/{asset}**  
-  - **Description**: Retrieve the cached price of an asset.
+  - **Description**: Retrieve the latest price of an asset.
   - **Parameters**:
      - `asset` (path parameter): Asset symbol (e.g., `btcusdt`).
   - **Responses**:
@@ -123,20 +160,22 @@ Each exchange supports 10,000 assets defined in `symbols.csv` and provides mock 
       {
         "asset": "btcusdt",
         "price": 79450.12,
-        "last_updated": 1696118400
+        "last_updated": "2023-10-01 12:00:00",
+        "time_ago": "5s ago",
+        "refresh_tier": "hot"
       }
       ```
     - **400**: Invalid asset symbol
       ```json
       {"msg": "Invalid asset symbol"}
       ```
-    - **404**: Asset not found in cache
+    - **404**: Asset not found
       ```json
       {"msg": "Asset not found"}
       ```
 
 - **POST /refresh/{asset}**  
-  - **Description**: Manually refresh the price of an asset.
+  - **Description**: Manually trigger a refresh of an asset's price data (automatic refresh also happens at tier-specific intervals).
   - **Parameters**:
     - `asset` (path parameter): Asset symbol (e.g., `btcusdt`).
   - **Responses**:
@@ -155,18 +194,69 @@ Each exchange supports 10,000 assets defined in `symbols.csv` and provides mock 
       {"msg": "Asset not found"}
       ```
 
+- **GET /health**  
+  - **Description**: Health check endpoint.
+  - **Responses**:
+    - **200**: Success
+      ```
+      OK
+      ```
+
+- **GET /metrics**  
+  - **Description**: Prometheus metrics endpoint.
+
 #### Logic Flow
 - **GET /prices/{asset}**:
   1. Validate the asset against `symbols.csv`.
   2. Retrieve price from Redis cache.
-  3. If cache miss, return 404.
+  3. If cache miss, check DynamoDB for historical data.
+  4. For cold tier assets or stale data, force a refresh.
+  5. Return the price data with formatted timestamp and tier information.
+
 - **POST /refresh/{asset}**:
   1. Validate the asset against `symbols.csv`.
-  2. Fetch mock price data (random price for simplicity).
-  3. Update Redis and DynamoDB.
-  4. Return confirmation message.
+  2. Manually trigger the refresher service to fetch new price data.
+  3. Return confirmation message.
+
+- **Automatic Price Refresh** (background process):
+  1. The refresher service runs in the background, managing separate goroutines for each asset tier.
+  2. For each asset, at its tier-specific interval:
+     - Fetch price data from all mock exchanges concurrently.
+     - Calculate weighted average based on volume.
+     - Update Redis with appropriate TTL and DynamoDB.
+     - Record metrics about the refresh operation.
 
 ### Testing the System
+#### Load Testing with Apache JMeter
+
+![Test Plan](screenshot_for_deploy/test_plan.png)
+
+The system was tested with JMeter using a tiered approach:
+
+- **Hot Assets Test Group**: 
+  - Thread count: 1000
+  - Ramp-up period: 10 seconds
+  - Loop count: 10
+  - Targeting top 20 assets
+
+- **Medium Assets Test Group**: 
+  - Thread count: 500
+  - Ramp-up period: 5 seconds
+  - Loop count: 10
+  - Targeting medium-tier assets
+
+- **Cold Assets Test Group**: 
+  - Thread count: 200
+  - Ramp-up period: 2 seconds
+  - Loop count: 5
+  - Targeting cold-tier assets
+
+Performance testing revealed several key insights:
+1. Cache optimization significantly improved hit rates
+2. Concurrent processing with goroutines increased throughput by 3x
+3. Memory management optimization led to more stable performance
+4. Cold-tier assets have a scaling limitation at ~5,500 concurrent requests
+
 #### Automated Testing with `test.sh`
 A `test.sh` script is provided to automate testing of the system components.
 
@@ -197,12 +287,13 @@ A `test.sh` script is provided to automate testing of the system components.
    {
      "symbol": "btcusdt",
      "price": 79850.12,
+     "volume": 1234567.89,
      "timestamp": 1696118400
    }
    ```
 
 2. **Test the API**:
-   - Refresh the price of an asset:
+   - Manually refresh the price of an asset:
      ```bash
      curl -X POST http://localhost:8080/refresh/btcusdt
      ```
@@ -221,126 +312,108 @@ A `test.sh` script is provided to automate testing of the system components.
      {
        "asset": "btcusdt",
        "price": 79450.12,
-       "last_updated": 1696118400
+       "last_updated": "2023-10-01 12:00:00",
+       "time_ago": "5s ago",
+       "refresh_tier": "hot"
      }
      ```
 
-3. **Check DynamoDB Data**:
-   Verify that price data is stored in DynamoDB:
+### Deployment Options
+
+#### 1. Local Deployment with Docker Compose
+
+The `docker-compose.yml` file is configured to run all components locally.
+
+#### 2. AWS Deployment with Terraform
+
+For production deployment to AWS, use the provided Terraform configuration:
+
+1. **Configure Terraform Variables**:
+   Create a `terraform.tfvars` file with your AWS credentials and configuration:
+   ```hcl
+   region        = "your-region"
+   key_name      = "your-key-name"
+   access_key    = "your-access-key"
+   secret_key    = "your-secret-key"
+   session_token = "your-session-token"
+   ```
+
+2. **Initialize Terraform**:
    ```bash
-   aws dynamodb scan --table-name prices --region us-west-2
-   ```
-   Expected output:
-   ```json
-   {
-     "Items": [
-       {
-         "asset": {"S": "btcusdt"},
-         "timestamp": {"N": "1696118400"},
-         "price": {"N": "79450.12"},
-         "updated_at": {"N": "1696118405"}
-       }
-     ]
-   }
+   terraform init
    ```
 
-4. **Load Testing with Apache JMeter**:
-   - Download and install [Apache JMeter](https://jmeter.apache.org/).
-   - Open JMeter and create a new test plan.
-   - Add a Thread Group:
-     - Number of Threads: 1000 (users)
-     - Ramp-up Period: 10 seconds
-     - Loop Count: 10
-   - Add an HTTP Request under the Thread Group:
-     - Server Name: `localhost`
-     - Port: `8080`
-     - Path: `/prices/BTCUSDT`
-     - Method: `GET`
-   - Add Listeners (e.g., View Results Tree, Summary Report) to analyze results.
-   - Run the test and verify:
-     - Throughput: 1000+ queries/sec
-     - Response Time: <100ms for cached requests
-     - Redis Cache Hit Rate: >90%
-
-### Deployment to AWS EC2
-1. **Create an EC2 Instance**:
-   - Choose `t3.medium` (2 vCPU, 4 GiB memory).
-   - Configure security group to allow inbound traffic on ports `8080`, `8081`, `8082`, `8083`.
-
-2. **Install Docker and Docker Compose**:
+3. **Preview the Deployment Plan**:
    ```bash
-   sudo apt update
-   sudo apt install docker.io docker-compose -y
-   sudo systemctl start docker
-   sudo systemctl enable docker
-   sudo usermod -aG docker ec2-user
+   terraform plan
    ```
 
-3. **Configure DynamoDB Access**:
-   - Option 1: Use IAM Role (recommended):
-     - Create an IAM role with `AmazonDynamoDBFullAccess` policy.
-     - Attach the role to the EC2 instance.
-   - Option 2: Copy AWS credentials:
-     ```bash
-     scp -i your-key.pem ~/.aws/credentials ec2-user@your-ec2-ip:/home/ec2-user/.aws/
-     scp -i your-key.pem ~/.aws/config ec2-user@your-ec2-ip:/home/ec2-user/.aws/
-     ```
-
-4. **Deploy with Docker Compose**:
-   - Upload the project to EC2:
-     ```bash
-     scp -i your-key.pem -r ./real-time-price-aggregator ec2-user@your-ec2-ip:/home/ec2-user/
-     ```
-   - Run Docker Compose:
-     ```bash
-     cd /home/ec2-user/real-time-price-aggregator
-     docker-compose up -d
-     ```
-
-5. **Test the Deployment**:
+4. **Deploy the Infrastructure**:
    ```bash
-   curl -X POST http://your-ec2-ip:8080/refresh/btcusdt
-   curl http://your-ec2-ip:8080/prices/btcusdt
+   terraform apply
    ```
 
-## Research
-- [CoinGecko](https://www.coingecko.com/) - Used for understanding price aggregation and market data.
-- [TradingView](https://www.tradingview.com/) - Reference for real-time financial data visualization.
-
-## Project Updates
-For a detailed overview of my individual contributions, including literature review, project backlog, code, documentation, testing, and future plans, please see the following updates:
-
-- [Project Update 1](docs/project_update/Project_Update_1.md): Initial implementation, automation with Docker Compose, and testing plan.
-
+The Terraform configuration (`main.tf`) provisions:
+- VPC with public and private subnets
+- EC2 instances for the application and mock exchanges and monitoring tools
+- Security groups for proper network access
+- DynamoDB tables
+- Redis instance
+- Load balancer for the application
 
 ### Project Structure
 ```
 real-time-price-aggregator/
 ├── cmd/
-│   └── main.go
+│   └── server/
+│       └── main.go               # Application entry point
 ├── internal/
-│   ├── api/
+│   ├── api/                      # API handlers
 │   │   └── handler.go
-│   ├── fetcher/
-│   │   └── fetcher.go
-│   ├── cache/
+│   ├── cache/                    # Redis cache implementation
 │   │   └── redis.go
-│   ├── storage/
+│   ├── circuitbreaker/           # Circuit breaker pattern
+│   │   └── circuit_breaker.go
+│   ├── fetcher/                  # Exchange data fetching
+│   │   └── fetcher.go
+│   ├── metrics/                  # Prometheus metrics
+│   │   ├── prometheus.go
+│   │   └── system_metrics.go
+│   ├── refresher/                # Auto-refresh service
+│   │   └── refresher.go
+│   ├── storage/                  # DynamoDB storage
 │   │   └── dynamodb.go
-│   └── types/
+│   └── types/                    # Common data types
 │       └── types.go
-├── mocks/
-│   │── mock_server.go
-│   └──Dockerfile
+├── mock/                         # Mock exchange services
+│   ├── mock_server.go
+│   └── Dockerfile
+├── deploy/                       # Deployment configurations
+│   ├── prometheus.yml
+│   └── price_aggregator.json     # Grafana dashboard
+├── terraform/                    # Terraform configuration
+│   ├── main.tf
+│   └── variables.tf
+├── test/                         # Testing utilities
+│   └── jmeter/                   # JMeter test plans
 ├── symbols.csv
-├── openapi.yaml
-├── Dockerfile
 ├── docker-compose.yml
 ├── go.mod
 ├── go.sum
 ├── test.sh
 └── README.md
 ```
+
+## 🔮 Future Work
+
+Several improvements are planned for future iterations:
+
+1. **Exchange API Integration**: Create more mock exchange servers or integrate with real APIs to further test system behavior
+2. **Scale Testing**: Increase symbol count to 10,000+ to simulate large-scale exchanges
+3. **Kafka Integration**: Re-evaluate Kafka implementation to address the data freshness challenges
+4. **Auto Scaling Implementation**: Implement and test auto-scaling capabilities for dynamic load management
+5. **Performance Profiling**: Conduct deeper analysis of cold-tier asset handling to address the scaling limitation discovered
+6. **Combined Load Tests**: Assess system behavior under mixed access patterns
 
 ## 📄 License
 This project is licensed under the [MIT License](LICENSE).
