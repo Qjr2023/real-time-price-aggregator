@@ -1,57 +1,42 @@
-version: '3.8'
 services:
   redis:
     image: redis:latest
     ports:
       - "6379:6379"
-    networks:
-      - price-aggregator-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+    restart: always
 
   exchange1:
     build:
-      context: .
-      dockerfile: mocks/Dockerfile
-    command: ./mock_server 8081 exchange1
+      context: ./mock
+    command: ["8081", "Exchange1"]
     ports:
       - "8081:8081"
-    depends_on:
-      - redis
-    networks:
-      - price-aggregator-network
+    restart: always
 
   exchange2:
     build:
-      context: .
-      dockerfile: mocks/Dockerfile
-    command: ./mock_server 8082 exchange2
+      context: ./mock
+    command: ["8082", "Exchange2"]
     ports:
       - "8082:8082"
-    depends_on:
-      - redis
-    networks:
-      - price-aggregator-network
+    restart: always
 
   exchange3:
     build:
-      context: .
-      dockerfile: mocks/Dockerfile
-    command: ./mock_server 8083 exchange3
+      context: ./mock
+    command: ["8083", "Exchange3"]
     ports:
       - "8083:8083"
-    depends_on:
-      - redis
-    networks:
-      - price-aggregator-network
+    restart: always
 
-  server:
+  app:
     build:
       context: .
-      dockerfile: Dockerfile
+    environment:
+      - REDIS_ADDR=redis:6379
+      - EXCHANGE1_URL=http://exchange1:8081/mock/ticker
+      - EXCHANGE2_URL=http://exchange2:8082/mock/ticker
+      - EXCHANGE3_URL=http://exchange3:8083/mock/ticker
     ports:
       - "8080:8080"
     depends_on:
@@ -59,57 +44,29 @@ services:
       - exchange1
       - exchange2
       - exchange3
-    networks:
-      - price-aggregator-network
-    environment:
-      - AWS_REGION=us-west-2
+    restart: always
     volumes:
-      - ~/.aws:/root/.aws:ro 
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+      - ./symbols.csv:/app/symbols.csv
 
   prometheus:
     image: prom/prometheus:latest
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus:/etc/prometheus
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--web.enable-lifecycle'
-    networks:
-      - price-aggregator-network
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: always
     depends_on:
-      - server
+      - app
 
   grafana:
     image: grafana/grafana:latest
     ports:
       - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_INSTALL_PLUGINS=grafana-piechart-panel
-    networks:
-      - price-aggregator-network
+    volumes:
+      - ./deploy/price_aggregator.json:/etc/grafana/provisioning/dashboards/price_aggregator.json
+    restart: always
     depends_on:
       - prometheus
-
-networks:
-  price-aggregator-network:
-    driver: bridge
-
-volumes:
-  prometheus_data:
-  grafana_data:
