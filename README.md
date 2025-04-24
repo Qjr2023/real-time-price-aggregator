@@ -26,7 +26,7 @@ This system fetches prices for financial assets (e.g., BTC, ETH) from multiple m
 
 ## 🏗️ System Architecture
 
-![System Architecture](screenshot_for_deploy/System_architecture.jpeg)
+![System Architecture](./docs/screenshot_for_deploy/System_architecture.jpeg)
 
 ### Mock Exchanges
 The system simulates three exchanges to mimic real-world trading platforms:
@@ -82,7 +82,7 @@ Each exchange supports 1000 assets defined in `symbols.csv` and provides mock pr
 - **Cache hit rate**: Near 100% after tier-specific TTL implementation
 - **Scaling limit**: ~5,500 concurrent requests for cold-tier assets
 
-![Test Results](test_results/final_test_3.png)
+![Test Results](./docs/test_results/final_test_3.png)
 
 ## ⚖️ Design Trade-offs
 - **Lambda vs. EC2 for Automatic Refreshes**: 
