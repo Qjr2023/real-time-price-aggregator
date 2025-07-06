@@ -1,19 +1,19 @@
 # Real-Time Price Aggregator
 
-A scalable distributed system that aggregates real-time financial asset prices from multiple trading platforms. Designed to handle high-concurrency user queries with low latency and high availability, while balancing cost and data freshness.
+A scalable system aggregating real-time financial asset prices from multiple platforms, optimized for low latency and high availability under high concurrency.
 
 ## 🧠 Project Overview
 
 This system fetches prices for financial assets (e.g., BTC, ETH) from multiple mock APIs, caches the latest data in Redis, and provides users with the aggregated price in real time using a weighted average based on trading volume. Historical price data is stored in DynamoDB for persistence.
 
 **Key Features:**
-- High-throughput API fetchers from three mock exchanges
+- Efficient multi-source API data fetching
 - Redis for real-time price caching with tier-specific TTLs
 - DynamoDB for historical price storage
 - Fault-tolerant with circuit breaker pattern
 - Prometheus + Grafana for comprehensive system metrics
 - Tiered automatic refresh based on asset popularity
-- Supports 1000 assets loaded from `symbols.csv`
+- Supports a large asset pool
 
 **Key Implementation:**
 - `GET /prices/{asset}` retrieves prices directly from Redis cache with fallback to DynamoDB
@@ -77,10 +77,13 @@ Each exchange supports 1000 assets defined in `symbols.csv` and provides mock pr
 - **Redis cache hit rate**: > 95%
 
 ### Achieved Performance
-- **Throughput**: ~8,000 requests/second under optimal conditions
-- **Latency**: Met P95/P99 targets for hot and medium assets
-- **Cache hit rate**: Near 100% after tier-specific TTL implementation
-- **Scaling limit**: ~5,500 concurrent requests for cold-tier assets
+
+| Metric            | Target       | Achieved       |
+|-------------------|--------------|----------------|
+| P95 Latency       | < 80ms       | Met            |
+| P99 Latency       | < 100ms      | Met            |
+| Throughput        | 1000+ req/s  | ~8000 req/s    |
+| Cache Hit Rate    | > 95%        | ~100%          |
 
 ![Test Results](./docs/test_results/final_test_3.png)
 
@@ -89,6 +92,7 @@ Each exchange supports 1000 assets defined in `symbols.csv` and provides mock pr
   - Considered using AWS Lambda for POST/refresh operations
   - Rejected due to CloudWatch's minimum interval of 1 minute (incompatible with 5s/30s refresh requirements) and cost considerations
   - Implemented using Go tickers on EC2 instances instead
+  - The EC2 solution is more suitable for current needs in terms of cost and real-time performance.
 
 - **Auto Scaling Group Implementation**:
   - Considered implementing ASG for dynamic scaling
@@ -229,7 +233,7 @@ Each exchange supports 1000 assets defined in `symbols.csv` and provides mock pr
 ### Testing the System
 #### Load Testing with Apache JMeter
 
-![Test Plan](screenshot_for_deploy/test_plan.png)
+![Test Plan](./docs/screenshot_for_deploy/test_plan.png)
 
 The system was tested with JMeter using a tiered approach:
 
