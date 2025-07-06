@@ -2,7 +2,20 @@
 
 A scalable system aggregating real-time financial asset prices from multiple platforms, optimized for low latency and high availability under high concurrency.
 
-## 🧠 Project Overview
+## Table of Contents
+- [Project Overview](#project-overview)
+- [System Architecture](#system-architecture)
+- [Tech Stack](#tech-stack)
+- [Performance Goals & Results](#performance-goals--results)
+- [Design Trade-offs](#design-trade-offs)
+- [How to Deploy](#how-to-deploy)
+- [API Design](#api-design)
+- [Testing the System](#testing-the-system)
+- [Project Structure](#project-structure)
+- [Future Work](#future-work)
+- [License](#license)
+
+## Project Overview
 
 This system fetches prices for financial assets (e.g., BTC, ETH) from multiple mock APIs, caches the latest data in Redis, and provides users with the aggregated price in real time using a weighted average based on trading volume. Historical price data is stored in DynamoDB for persistence.
 
@@ -24,7 +37,7 @@ This system fetches prices for financial assets (e.g., BTC, ETH) from multiple m
   - Cold assets (remaining 800): Every 5 minutes
 - Manual `POST /refresh/{asset}` for on-demand price refresh
 
-## 🏗️ System Architecture
+## System Architecture
 
 ![System Architecture](./docs/screenshot_for_deploy/System_architecture.jpeg)
 
@@ -56,7 +69,7 @@ Each exchange supports 1000 assets defined in `symbols.csv` and provides mock pr
 
 **Note**: The table is automatically created when the server starts, using code in `internal/storage/dynamodb.go`.
 
-## 🔧 Tech Stack
+## Tech Stack
 - **Backend**: Go (microservices)
 - **Cache**: Redis
 - **Database**: DynamoDB (via AWS DynamoDB)
@@ -64,7 +77,7 @@ Each exchange supports 1000 assets defined in `symbols.csv` and provides mock pr
 - **Testing**: Apache JMeter (for load and latency testing)
 - **Deployment**: Docker Compose (local), Terraform (AWS)
 
-## 📊 Performance Goals & Results
+## Performance Goals & Results
 
 ### Performance Targets
 - **Latency**: 
@@ -87,7 +100,7 @@ Each exchange supports 1000 assets defined in `symbols.csv` and provides mock pr
 
 ![Test Results](./docs/test_results/final_test_3.png)
 
-## ⚖️ Design Trade-offs
+## Design Trade-offs
 - **Lambda vs. EC2 for Automatic Refreshes**: 
   - Considered using AWS Lambda for POST/refresh operations
   - Rejected due to CloudWatch's minimum interval of 1 minute (incompatible with 5s/30s refresh requirements) and cost considerations
@@ -107,7 +120,7 @@ Each exchange supports 1000 assets defined in `symbols.csv` and provides mock pr
   - Current system configuration balances throughput and latency
   - Primary optimization target is response time, with throughput as secondary consideration
 
-## 🚀 How to Run
+## How to Deploy
 
 ### Prerequisites
 1. Install [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/).
@@ -142,7 +155,11 @@ Each exchange supports 1000 assets defined in `symbols.csv` and provides mock pr
      symbol1000
      ```
 
-3. **Start All Services with Docker Compose (Local Deployment)**:
+
+### Deployment Options
+
+#### 1. Local Deployment with Docker Compose
+
    ```bash
    docker-compose up --build
    ```
@@ -152,8 +169,46 @@ Each exchange supports 1000 assets defined in `symbols.csv` and provides mock pr
    - Start the three mock exchanges on ports `8081`, `8082`, and `8083`.
    - Start the main server on port `8080`.
 
-### API Design
-#### Endpoints
+#### 2. AWS Deployment with Terraform
+
+For production deployment to AWS, use the provided Terraform configuration:
+
+1. **Configure Terraform Variables**:
+   Create a `terraform.tfvars` file with your AWS credentials and configuration:
+   ```hcl
+   region        = "your-region"
+   key_name      = "your-key-name"
+   access_key    = "your-access-key"
+   secret_key    = "your-secret-key"
+   session_token = "your-session-token"
+   ```
+   **Note**: This approach is intended solely for laboratory or development environments. Storing credentials directly in a terraform.tfvars file is not secure for production use. In production environments, it is strongly recommended to utilize IAM roles for enhanced security and compliance with best practices.
+
+2. **Initialize Terraform**:
+   ```bash
+   terraform init
+   ```
+
+3. **Preview the Deployment Plan**:
+   ```bash
+   terraform plan
+   ```
+
+4. **Deploy the Infrastructure**:
+   ```bash
+   terraform apply
+   ```
+
+The Terraform configuration (`main.tf`) provisions:
+- VPC with public and private subnets
+- EC2 instances for the application and mock exchanges and monitoring tools
+- Security groups for proper network access
+- DynamoDB tables
+- Redis instance
+- Load balancer for the application
+
+## API Design
+### Endpoints
 - **GET /prices/{asset}**  
   - **Description**: Retrieve the latest price of an asset.
   - **Parameters**:
@@ -209,7 +264,7 @@ Each exchange supports 1000 assets defined in `symbols.csv` and provides mock pr
 - **GET /metrics**  
   - **Description**: Prometheus metrics endpoint.
 
-#### Logic Flow
+### Logic Flow
 - **GET /prices/{asset}**:
   1. Validate the asset against `symbols.csv`.
   2. Retrieve price from Redis cache.
@@ -230,8 +285,8 @@ Each exchange supports 1000 assets defined in `symbols.csv` and provides mock pr
      - Update Redis with appropriate TTL and DynamoDB.
      - Record metrics about the refresh operation.
 
-### Testing the System
-#### Load Testing with Apache JMeter
+## Testing the System
+### Load Testing with Apache JMeter
 
 ![Test Plan](./docs/screenshot_for_deploy/test_plan.png)
 
@@ -261,7 +316,7 @@ Performance testing revealed several key insights:
 3. Memory management optimization led to more stable performance
 4. Cold-tier assets have a scaling limitation at ~5,500 concurrent requests
 
-#### Automated Testing with `test.sh`
+### Automated Testing with `test.sh`
 A `test.sh` script is provided to automate testing of the system components.
 
 1. **Make the Script Executable**:
@@ -281,7 +336,7 @@ A `test.sh` script is provided to automate testing of the system components.
    - Test the `POST /refresh/btcusdt` endpoint.
    - Verify that price data is stored in DynamoDB.
 
-#### Manual Testing  
+### Manual Testing  
 1. **Test the Mock Exchanges**:
    ```bash
    curl http://localhost:8081/mock/ticker/btcusdt
@@ -322,48 +377,7 @@ A `test.sh` script is provided to automate testing of the system components.
      }
      ```
 
-### Deployment Options
 
-#### 1. Local Deployment with Docker Compose
-
-The `docker-compose.yml` file is configured to run all components locally.
-
-#### 2. AWS Deployment with Terraform
-
-For production deployment to AWS, use the provided Terraform configuration:
-
-1. **Configure Terraform Variables**:
-   Create a `terraform.tfvars` file with your AWS credentials and configuration:
-   ```hcl
-   region        = "your-region"
-   key_name      = "your-key-name"
-   access_key    = "your-access-key"
-   secret_key    = "your-secret-key"
-   session_token = "your-session-token"
-   ```
-
-2. **Initialize Terraform**:
-   ```bash
-   terraform init
-   ```
-
-3. **Preview the Deployment Plan**:
-   ```bash
-   terraform plan
-   ```
-
-4. **Deploy the Infrastructure**:
-   ```bash
-   terraform apply
-   ```
-
-The Terraform configuration (`main.tf`) provisions:
-- VPC with public and private subnets
-- EC2 instances for the application and mock exchanges and monitoring tools
-- Security groups for proper network access
-- DynamoDB tables
-- Redis instance
-- Load balancer for the application
 
 ### Project Structure
 ```
@@ -408,7 +422,7 @@ real-time-price-aggregator/
 └── README.md
 ```
 
-## 🔮 Future Work
+## Future Work
 
 Several improvements are planned for future iterations:
 
@@ -419,5 +433,5 @@ Several improvements are planned for future iterations:
 5. **Performance Profiling**: Conduct deeper analysis of cold-tier asset handling to address the scaling limitation discovered
 6. **Combined Load Tests**: Assess system behavior under mixed access patterns
 
-## 📄 License
+## License
 This project is licensed under the [MIT License](LICENSE).
